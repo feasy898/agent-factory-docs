@@ -1,0 +1,92 @@
+#!/bin/bash
+# judge2.sh — cal2 round: build task image (if needed) and run the pytest suite against a scratch dir.
+# Grading tests are read from the hidden grading tree (anti-cheat); build inputs stay in the task dir.
+# The task image is dropped after judging to control disk (rebuilt on demand, layer cache stays warm).
+# Usage: judge2.sh <task_dir> <scratch_dir> <result_json_out>
+# Exit code 0 = tests passed; 1 = tests failed; 2 = infra error.
+set -uo pipefail
+TASK_DIR="$1"; SCRATCH="$2"; OUT="$3"
+BENCH="${BENCH:-/home/pan-ding/bench}"
+GRADING_HOME="${GRADING_HOME:-/home/pan-ding/bench/.grading-b6a766c909}"
+LOG="$OUT.log"
+mkdir -p "$(dirname "$OUT")"
+
+task_name=$(basename "$TASK_DIR")
+img_tag="tbtask-$task_name"
+
+# --- build image if absent ---
+if ! docker image inspect "$img_tag:latest" >/dev/null 2>&1; then
+  echo "[judge] building $img_tag" >> "$LOG" 2>&1
+  bctx=$(mktemp -d /tmp/tbbuild.XXXXXX)
+  cp -r "$TASK_DIR"/. "$bctx"/
+  # inject mirror config after each FROM so RUN pip/apt work on this host's network
+  python3 - "$bctx/Dockerfile" << 'PY'
+import sys, re
+p = sys.argv[1]
+text = open(p, encoding="utf-8", errors="replace").read()
+inject = (
+    "RUN mkdir -p /etc/pip && printf '[global]\\nindex-url=https://mirrors.aliyun.com/pypi/simple/\\n"
+    "trusted-host=mirrors.aliyun.com\\n' > /etc/pip/pip.conf || true\n"
+    "RUN (sed -i 's|http://archive.ubuntu.com/ubuntu|https://mirrors.aliyun.com/ubuntu|g; "
+    "s|http://security.ubuntu.com/ubuntu|https://mirrors.aliyun.com/ubuntu|g; "
+    "s|http://deb.debian.org|https://mirrors.aliyun.com|g' "
+    "/etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true)\n"
+)
+lines = text.splitlines(keepends=True)
+out = []
+for l in lines:
+    out.append(l if l.endswith("\n") else l + "\n")
+    if re.match(r"(?i)^\s*FROM\s", l):
+        out.append(inject)
+open(p, "w", encoding="utf-8").write("".join(out))
+PY
+  if ! timeout -k 30 5400 env DOCKER_BUILDKIT=0 docker build -t "$img_tag:latest" "$bctx" >> "$LOG" 2>&1; then
+    echo "{\"status\":\"infra\",\"reason\":\"build_failed\"}" > "$OUT"
+    rm -rf "$bctx"; docker ps -q --filter "ancestor=$img_tag:latest" | xargs -r docker rm -f >/dev/null 2>&1; exit 2
+  fi
+  if false; then
+    echo "{\"status\":\"infra\",\"reason\":\"build_failed\"}" > "$OUT"
+    rm -rf "$bctx"; exit 2
+  fi
+  rm -rf "$bctx"
+fi
+
+# --- run tests ---
+# scratch mounted at /app (matching agent cwd), grading tests mounted at /tests
+GSRC="$GRADING_HOME/$task_name"
+if [ ! -d "$GSRC" ]; then
+  echo "{\"status\":\"infra\",\"reason\":\"grading_src_missing\"}" > "$OUT"
+  exit 2
+fi
+tdir=$(mktemp -d /tmp/tbtests.XXXXXX)
+cp -r "$GSRC/." "$tdir"/
+cp "$tdir/test.py" "$SCRATCH"/ 2>/dev/null || true
+res=$(mktemp /tmp/tbrun.XXXXXX)
+timeout -k 30 900 docker run --sig-proxy=false --rm \
+  -v "$(realpath "$SCRATCH")":/app \
+  -v "$tdir":/tests \
+  -e TEST_DIR=/tests \
+  -w /app \
+  "$img_tag:latest" \
+  bash -lc 'PY=$(command -v python3 || command -v python); export PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ PIP_TRUSTED_HOST=mirrors.aliyun.com DEBIAN_FRONTEND=noninteractive PIP_BREAK_SYSTEM_PACKAGES=1; if ! $PY -c "import pytest, setuptools" 2>/dev/null; then pip3 install -q pytest==8.4.1 setuptools 2>/dev/null || $PY -m pip install -q pytest==8.4.1 setuptools 2>/dev/null || { apt-get update -qq 2>/dev/null; apt-get install -y -qq python3-pip 2>/dev/null; $PY -m pip install -q pytest==8.4.1 setuptools 2>/dev/null; }; fi; if ! $PY -c "import pytest, setuptools" 2>/dev/null; then echo JUDGE_ENV_NO_PYTEST; exit 97; fi; git config --global --add safe.directory "*" 2>/dev/null || true; $PY -m pytest $TEST_DIR/test_outputs.py -rA 2>/dev/null || $PY -m pytest /tests -rA' \
+  > "$res" 2>&1
+rc=$?
+tail -100 "$res" >> "$LOG"
+
+if [ $rc -eq 0 ]; then
+  echo "{\"status\":\"pass\"}" > "$OUT"
+elif [ $rc -eq 124 ]; then
+  echo "{\"status\":\"infra\",\"reason\":\"test_timeout\"}" > "$OUT"
+elif [ $rc -eq 97 ]; then
+  echo "{\"status\":\"infra\",\"reason\":\"pytest_env_broken\"}" > "$OUT"
+else
+  echo "{\"status\":\"fail\"}" > "$OUT"
+fi
+rm -rf "$tdir" "$res"
+# disk control: drop the task image after judging ONLY when disk is tight (keeps images
+# for reuse across configs when space allows — rebuilds are the dominant cost on a slow mirror)
+avail=$(df --output=avail -BG / | tail -1 | tr -dc 0-9)
+if [ "${avail:-0}" -lt 8 ]; then
+  docker rmi "$img_tag:latest" >/dev/null 2>&1 || true
+fi
+exit 0

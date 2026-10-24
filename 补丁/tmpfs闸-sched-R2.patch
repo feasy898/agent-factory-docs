@@ -1,0 +1,90 @@
+--- a/tools/factory-sched.py
++++ b/tools/factory-sched.py
+@@ -68,6 +68,22 @@
+ # bench-arm 无有效行的连续失败上限：达到即终态 failed（需人工），防死循环烧 API。
+ FAIL_LIMIT = 3
+ 
++# tmpfs 闸阈值（D-24 结果目录 tmpfs，2026-10-22 补丁 R2）：所有 bench-arm 的 out 都落
++# 本机 /tmp（tmpfs 7.5G，与产线数据/研究构建产物共居，host 无关——factory/factory2 两图
++# 49 个臂节点 out 全部 /tmp/bench-*）。校准依据：10-21 晚 /tmp（tmpfs+usrquota）配额
++# 耗尽 EDQUOT(Errno 122)、main-sched 被杀，实测发生于仅余 ~1.7G 时（mes500-根因报告.md:42
++# + 对齐组-state.md:252）；本轮 64M-1G 金丝雀臂在余量 3.07G 时全部通过 → 校准
++# WARN=2.6GiB / CLOSE=2.2GiB（换算 MiB 向上取整，取保守侧）。env 覆盖单位 MiB（整数），
++# 非法值静默回退默认（启动横幅会印出生效值，可发现覆盖没生效）。
++def _tmpfs_env_mb(key, default_mb):
++    try:
++        return max(0, int((os.environ.get(key) or "").strip() or default_mb))
++    except ValueError:
++        return default_mb
++
++TMPFS_WARN_MB = _tmpfs_env_mb("FACTORY_SCHED_TMPFS_WARN_MB", 2663)  # ≈2.6GiB 预警线
++TMPFS_MIN_MB = _tmpfs_env_mb("FACTORY_SCHED_TMPFS_MIN_MB", 2253)    # ≈2.2GiB 关闭线（fail-closed）
++
+ SAMPLE = f"{WS}/计划/s1-swev-120.json"
+ 
+ # 既有结果目录（append 续跑，避免重复行；命名不一致故显式映射）
+@@ -393,6 +409,29 @@
+             pass
+         return self._mem_ok, self._mem_avail
+ 
++    def tmpfs_gate(self):
++        """tmpfs 闸：本机 /tmp 可用 <TMPFS_MIN_MB 时 fail-closed 暂派新 bench-arm。
++        statvfs 本地读 f_bavail（绝不把盘点经 ssh 传远端）；盘点失败按 -1 口径
++        fail-closed（同 disk_gate/mem_gate 的"判不准不放行"）。只拦新不杀旧：在跑臂
++        的 out 写入不拦截，暂派让 /tmp 随任务收尾自然回落。<TMPFS_WARN_MB 为预警带：
++        放行但记一次（_tmp_logged 去重，恢复≥预警线时补一行解除）。60s 缓存对齐两闸
++        节奏。不限 host——所有臂 out 同在本机 /tmp（anolis 臂由 af-bench 在本机落
++        results.jsonl），host=="local" 特判版是空操作（mingda-bench 等新 host 键同理
++        全过本闸）。"""
++        now = time.time()
++        if now - getattr(self, "_tmpfs_at", 0) < 60:
++            return getattr(self, "_tmpfs_ok", True), getattr(self, "_tmpfs_avail_mb", -1)
++        self._tmpfs_at = now
++        self._tmpfs_ok = False  # fail-closed：只有拿到确定读数且高于关闭线才放行
++        self._tmpfs_avail_mb = -1
++        try:
++            st = os.statvfs("/tmp")
++            self._tmpfs_avail_mb = st.f_bavail * st.f_frsize // 1048576
++            self._tmpfs_ok = self._tmpfs_avail_mb >= TMPFS_MIN_MB
++        except OSError:
++            pass  # 维持 fail-closed 与 -1 口径
++        return self._tmpfs_ok, self._tmpfs_avail_mb
++
+     def launch(self, node):
+         nid = node["id"]
+         if node["kind"] == "relay-image":
+@@ -412,6 +451,24 @@
+                    node["params"]["image"], "--org", org]
+             cwd = WS
+         elif node["kind"] == "bench-arm":
++            # tmpfs 闸（D-24）：不限 host——所有臂 out 都落本机 /tmp。低于关闭线（或
++            # 盘点失败）本轮不启动新臂；在跑臂不杀，恢复自动放行。
++            ok, avail_mb = self.tmpfs_gate()
++            if not ok:
++                if getattr(self, "_tmp_logged", "") != "closed":
++                    why = (f"/tmp 可用 {avail_mb}MiB < 关闭线 {TMPFS_MIN_MB}MiB" if avail_mb >= 0
++                           else "/tmp 盘点失败（statvfs 异常，fail-closed）")
++                    log(f"tmpfs 闸暂停派臂：{why}，本轮不启动新 bench-arm（在跑任务不杀，恢复自动放行）")
++                    self._tmp_logged = "closed"
++                return
++            if avail_mb < TMPFS_WARN_MB:
++                if getattr(self, "_tmp_logged", "") != "warn":
++                    log(f"tmpfs 闸预警：/tmp 可用 {avail_mb}MiB < 预警线 {TMPFS_WARN_MB}MiB"
++                        f"（继续派臂，逼近 fail-closed）")
++                    self._tmp_logged = "warn"
++            elif getattr(self, "_tmp_logged", ""):
++                log(f"tmpfs 闸解除：/tmp 可用 {avail_mb}MiB ≥ 预警线 {TMPFS_WARN_MB}MiB（恢复常态）")
++                self._tmp_logged = ""
+             p = node["params"]
+             host = p.get("host", "anolis")
+             # 内存闸（只作用于 anolis 臂）：available <15G 暂不派新臂；在跑任务不杀，
+@@ -626,6 +683,9 @@
+         return
+     sched = Sched()
+     log(f"调度器启动（pid {os.getpid()}），图 {GRAPH}")
++    log(f"[gate] tmpfs 闸生效: /tmp 关闭线<{TMPFS_MIN_MB}MiB 预警线<{TMPFS_WARN_MB}MiB"
++        f"（statvfs f_bavail 本地读，盘点失败 fail-closed 暂派新 bench-arm；"
++        f"env FACTORY_SCHED_TMPFS_WARN_MB/FACTORY_SCHED_TMPFS_MIN_MB 可覆盖）")
+     while True:
+         try:
+             sched.loop()

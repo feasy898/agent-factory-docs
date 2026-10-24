@@ -1,0 +1,173 @@
+# 补丁：安灯口径-任务级（factory-watch.py A1/A2 由 attempt 行级改为任务级末行）
+# 日期：2026-10-22  身份：修理组子代理（安灯口径修正单，step-5-preview 载体）
+# 缘起：厂长 14:1x 亲算——行级口径把"曾经失败过的尝试"计成"现在仍失败"，
+#       D1/D2-step-5 行级 run_failed 13/17 → 末态 0；D1/D2-m31f 行级拦截 27/21
+#       → 末态零补丁 5/1；10%/30% 阈值全不触，四红灯全误报。与②组 mcode 官方线
+#       "必须 last-row 口径"同源同坑。
+# 改动：①A1/A2 按 task_id 取 results.jsonl 末行（任务级）统计；②results.jsonl
+#       二进制逐行读+逐行 try/except，坏行跳过并计数 n_bad_lines；③行级值降为
+#       render_report [口径明细] 诊断信息行（不触发安灯）+ snapshot 新字段；
+#       ④docstring 口径同步。A0/A3-A9/归档豁免/since 去重/矩阵格式均不变。
+# 应用：cd 工作区根 && patch -p0 < 补丁/安灯口径-任务级-20261022.patch
+# 回滚（一行）：cp 工具状态备份/factory-watch.py.pre-caliber-20261022-142423 \
+#               tools/factory-watch.py && (kill $(cat 状态观测/watchdog.pid) || true)
+#   （keepalive 30s 内自动以旧码拉起 watch；等幂验证见 计划/研究组/安灯口径修正-交付.md）
+#   等价补丁式回滚：patch -p0 -R < 补丁/安灯口径-任务级-20261022.patch
+--- 工具状态备份/factory-watch.py.pre-caliber-20261022-142423	2026-10-22 14:24:23.869226475 +0800
++++ tools/factory-watch.py	2026-10-22 14:26:20.623101274 +0800
+@@ -17,10 +17,17 @@
+ 
+ 安灯规则（level / code / 触发条件，实现见 build_alarms()）:
+   red   A0  调度器死/状态停更（状态文件缺失、mtime>300s，或进程连续 2 轮不在）
+-  red   A1  任一臂 run_failed 占比>10%（≥5 行）
++  red   A1  任一臂末态 run_failed 占比>10%（≥5 题；任务级口径：按 task_id 取
++            results.jsonl 末行，重试救回的 attempt 不计——2026-10-22 修，修前
++            行级口径把"曾经失败过的尝试"计成"现在仍失败"（实证 D1/D2-step-5
++            行级 13/17 → 末态 0，四臂全误报）；与②组 mcode 官方线"78 任务有
++            重复行、71 是 None+judged 混合、必须 last-row 口径"同源同坑）
+             （归档豁免：results.jsonl mtime>6h 且无关联在跑进程的终态臂跳过不报，
+             安灯节汇总一行 [已归档臂]——慢性信号不再每轮复报，归档依据见巡检日志）
+-  red   A2  任一臂 零补丁或 gate 拦截占比>30%（≥10 行）（同 A1 归档豁免）
++  red   A2  任一臂末态零补丁（reward 为 None 且非 run_failed）占比>30%（≥10 题；
++            同 A1 任务级口径。不用 gate 判零补丁：实证 gate=no_patch 行里有
++            reward=true（启发式误判），reward/status 才是判分事实）
++            （同 A1 归档豁免；行级零补丁/gate 拦截降为诊断信息行，不再触发红灯）
+   amber A3  某档案 ≥10 题已判分且通过数为 0
+   amber A4  anolis 任一巡检分区（/data、/）使用率>85%
+   amber A4L 本机 /tmp 可用 <2662MiB（usrquota 校准线 2.6GiB，D-24；statvfs 盘点失败
+@@ -36,7 +43,9 @@
+             镜像池另巡检上报，但不参与 A7——2026-10-22 前数的是 anolis 池，
+             与 feed 进度无关，实证为误报来源）
+ 
+-容错：bench-fix1-* 目录尚未生成/工厂重启后空目录/结果行为空或坏 JSON/anolis ssh 不通/
++容错：bench-fix1-* 目录尚未生成/工厂重启后空目录/结果行有空行或坏 JSON（逐行
++      try/except 跳过并计数 n_bad_lines，不整文件失败、不漏坏行之后的所有行——
++      2026-10-22 修，实测 D1-mavis-m31f 有 1 行写截断）/anolis ssh 不通/
+       调度器从未运行——全部不崩，按 0 或 ok:false 呈现。密钥零明文（本脚本不碰密钥）。
+ """
+ import argparse
+@@ -206,6 +215,9 @@
+         "dir": path, "exists": os.path.isdir(path),
+         "n_total": 0, "n_reward_true": 0, "n_completed_not_reward": 0,
+         "n_run_failed": 0, "n_blocked": 0,
++        # 任务级（末行口径，A1/A2 判定用，2026-10-22 修）：按 task_id 取末行
++        "n_tasks": 0, "task_run_failed": 0, "task_zero_patch": 0,
++        "n_bad_lines": 0,          # 坏行计数（JSON 解析/解码失败，逐行跳过）
+         "sum_turns": 0, "n_turns": 0,
+         "sum_tin": 0, "sum_tout": 0, "sum_tcache": 0, "n_tokens": 0,
+         "sum_wall_ms": 0, "n_wall": 0,
+@@ -222,14 +234,17 @@
+     last_by_task = {}
+     any_reward = set()
+     try:
+-        with open(res, encoding="utf-8") as f:
+-            for line in f:
+-                line = line.strip()
+-                if not line:
+-                    continue
++        # 二进制逐行读 + 逐行 try/except：坏行（写截断/编码坏字节）跳过并计数，
++        # 不整文件失败、不漏掉坏行之后的所有行（2026-10-22 修；D1-m31f 实测 1 行）
++        with open(res, "rb") as f:
++            for raw in f:
+                 try:
++                    line = raw.decode("utf-8").strip()
++                    if not line:
++                        continue
+                     r = json.loads(line)
+-                except json.JSONDecodeError:
++                except Exception:
++                    st["n_bad_lines"] += 1
+                     continue
+                 if not isinstance(r, dict):
+                     continue
+@@ -267,6 +282,15 @@
+     except FileNotFoundError:
+         st["exists"] = False
+         return st
++    # 任务级末行口径（A1/A2 判定，2026-10-22 修）：last_by_task 即 append 序末行
++    st["n_tasks"] = len(last_by_task)
++    st["task_run_failed"] = sum(
++        1 for r in last_by_task.values() if r.get("status") == "run_failed")
++    # 末态零补丁：判分事实 reward=None（未解决/未判到）且末行非 run_failed。
++    # 不用 gate 判零补丁——实证 gate=no_patch 行里有 reward=true（启发式误判）。
++    st["task_zero_patch"] = sum(
++        1 for r in last_by_task.values()
++        if r.get("reward") is None and r.get("status") != "run_failed")
+     st["judged_tasks"] = sum(
+         1 for r in last_by_task.values()
+         if r.get("reward") is not None or r.get("status") not in (None, "run_failed"))
+@@ -603,21 +627,27 @@
+     elif sched["proc_confirmed_down"]:
+         add("red", "A0", "A0", "调度器进程不存在（连续 2 轮 pgrep 无果）", t)
+ 
+-    # A1 / A2 按臂（归档的终态臂跳过：results.jsonl mtime>6h 且无关联在跑进程，
++    # A1/A2 按臂（归档的终态臂跳过：results.jsonl mtime>6h 且无关联在跑进程，
+     # 慢性红灯不再每轮复报——汇总见安灯节 [已归档臂] 行，归档依据见巡检日志）
+     archived_dirs = {a["dir"] for a in (archived or [])}
+     for a in arms:
+         if a["dir"] in archived_dirs:
+             continue
+         name = f"{a['tier']}-{a['profile']}"
+-        if a["n_total"] >= 5 and a["n_run_failed"] / a["n_total"] > 0.10:
++        # A1/A2 = 任务级末行口径（2026-10-22 修）：按 task_id 取 results.jsonl 末行，
++        # 重试救回的 attempt 不计入；行级值降为诊断信息行（render_report [口径明细]），
++        # 不再触发红灯。修前误报实证：D1/D2-step-5 行级 run_failed 13/17 → 末态 0，
++        # D1/D2-mavis-m31f 行级拦截 27/21 → 末态零补丁 5/1，10%/30% 阈值全不触。
++        if a["n_tasks"] >= 5 and a["task_run_failed"] / a["n_tasks"] > 0.10:
+             add("red", "A1", f"A1:{name}",
+-                f"臂 {name}: run_failed {a['n_run_failed']}/{a['n_total']} "
+-                f"({a['n_run_failed'] * 100 / a['n_total']:.0f}%) > 10%", t)
+-        if a["n_total"] >= 10 and a["n_blocked"] / a["n_total"] > 0.30:
++                f"臂 {name}: 末态 run_failed {a['task_run_failed']}/{a['n_tasks']} "
++                f"({a['task_run_failed'] * 100 / a['n_tasks']:.0f}%) > 10%"
++                f"（任务级末行口径；行级 run_failed={a['n_run_failed']}/{a['n_total']} 为历史尝试）", t)
++        if a["n_tasks"] >= 10 and a["task_zero_patch"] / a["n_tasks"] > 0.30:
+             add("red", "A2", f"A2:{name}",
+-                f"臂 {name}: 零补丁/gate拦截 {a['n_blocked']}/{a['n_total']} "
+-                f"({a['n_blocked'] * 100 / a['n_total']:.0f}%) > 30%", t)
++                f"臂 {name}: 末态零补丁 {a['task_zero_patch']}/{a['n_tasks']} "
++                f"({a['task_zero_patch'] * 100 / a['n_tasks']:.0f}%) > 30%"
++                f"（任务级末行口径；行级零补丁/gate拦截={a['n_blocked']}/{a['n_total']} 为历史尝试）", t)
+ 
+     # A3 按档案聚合：≥10 题已判分且通过 0
+     by_prof = {}
+@@ -740,6 +770,10 @@
+         "n_reward_true": sum(a["n_reward_true"] for a in arms),
+         "n_run_failed": sum(a["n_run_failed"] for a in arms),
+         "rows_10m": sum(a["rows_10m"] for a in arms),
++        "n_tasks": sum(a["n_tasks"] for a in arms),
++        "task_run_failed": sum(a["task_run_failed"] for a in arms),
++        "task_zero_patch": sum(a["task_zero_patch"] for a in arms),
++        "n_bad_lines": sum(a["n_bad_lines"] for a in arms),
+     }
+     cost = []
+     for prof in PROFILES:
+@@ -766,6 +800,7 @@
+         "arms": [{k: a[k] for k in (
+             "tier", "profile", "dir", "exists", "n_total", "n_reward_true",
+             "n_completed_not_reward", "n_run_failed", "n_blocked",
++            "n_tasks", "task_run_failed", "task_zero_patch", "n_bad_lines",
+             "judged_tasks", "resolved_tasks", "rows_10m", "last_new_row_age_s",
+         )} | {
+             "avg_turns": round(a["sum_turns"] / a["n_turns"], 1) if a["n_turns"] else None,
+@@ -836,6 +871,20 @@
+     L.append(f"  合计: 行 {t['n_total']}，reward=true {t['n_reward_true']}，"
+              f"run_failed {t['n_run_failed']}，最近10分钟新增 {t['rows_10m']} 行")
+ 
++    # 口径明细（2026-10-22 修）：A1/A2 按任务级末行判定；行级=历史 attempt 仅诊断
++    data_arms = [a for a in s["arms"]
++                 if a["exists"] and (a["n_total"] > 0 or a["n_bad_lines"] > 0)]
++    if data_arms:
++        L.append("[口径明细] A1/A2=任务级末行（每 task 取 results.jsonl 末行，重试救回不计）；"
++                 "行级=历史 attempt，仅诊断不触发安灯")
++        for a in data_arms:
++            nm = f"{a['tier']}-{a['profile']}"
++            bad = f"  坏行 {a['n_bad_lines']}" if a["n_bad_lines"] else ""
++            L.append(f"  {nm:<18}唯一题 {a['n_tasks']:>3}  末态 run_failed {a['task_run_failed']:>2}  "
++                     f"末态零补丁 {a['task_zero_patch']:>2}  ｜行级 run_failed "
++                     f"{a['n_run_failed']}/{a['n_total']}  零补丁/gate "
++                     f"{a['n_blocked']}/{a['n_total']}{bad}")
++
+     for e in s.get("extra_schedulers", []):
+         if not e["exists"]:
+             L.append(f"[实验线调度器] 状态文件缺失（{e['status']}）")

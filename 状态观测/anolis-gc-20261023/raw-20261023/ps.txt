@@ -1,0 +1,4 @@
+$ docker ps -a --format '{{.ID}}|{{.Image}}|{{.Status}}|{{.Names}}'
+de7d1cef4527	swebench/sweb.eval.x86_64.django_1776_django-16938:latest	Up 1 second	afbench-swev-django-django-16938-longcat
+7391ef3ce8c6	swebench/sweb.eval.x86_64.pydata_1776_xarray-4094:latest	Up 16 minutes	afbench-swev-pydata-xarray-4094-mavis-m31f-c2
+bc7e0e0fc31f	swebench/sweb.eval.x86_64.sympy_1776_sympy-13877:latest	Up 22 minutes	afbench-swev-sympy-sympy-13877-mavis-m31f-c2

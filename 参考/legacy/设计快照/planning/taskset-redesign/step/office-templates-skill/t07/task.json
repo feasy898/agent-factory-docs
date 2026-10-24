@@ -1,0 +1,58 @@
+{
+  "id": "t07",
+  "type": "trap",
+  "difficulty": "hard",
+  "instruction": "使用 office-templates 技能，对下面四组非法输入分别构造并执行生成命令，记录每组退出码、stderr 与产物残留。对照组使用合法周报数据。判定被测 CLI 契约（SKILL.md §4）是否与参照一致。",
+  "nonce_input": {
+    "description": "四组非法输入描述 + 一组合法对照数据，内嵌",
+    "test_cases": [
+      {
+        "id": "invalid_template",
+        "template": "证书",
+        "data_ofn": "合法对照数据见下方",
+        "desc": "模板名不在四类"
+      },
+      {
+        "id": "missing_file",
+        "template": "周报",
+        "data_ofn": "/_nonexistent_/data.json",
+        "desc": "数据文件不存在"
+      },
+      {
+        "id": "bad_json",
+        "template": "周报",
+        "data_content": "不是JSON",
+        "desc": "JSON 解析失败"
+      },
+      {
+        "id": "top_level_array",
+        "template": "周报",
+        "data_content": "[\"数组\",\"非对象\"]",
+        "desc": "顶层非对象"
+      }
+    ],
+    "control": {
+      "template": "周报",
+      "data": {
+        "部门": "测试部",
+        "填报人": "赵倩",
+        "周期": "第40周",
+        "本周工作内容": [
+          "完成接口回归测试"
+        ],
+        "下周工作计划": [
+          "整理缺陷清单并分派责任人"
+        ],
+        "问题与需协调事项": "",
+        "报送日期": ""
+      }
+    }
+  },
+  "expected": {
+    "每组退出码": 2,
+    "产物残留数": 0,
+    "对照组退出码": 0,
+    "stderr_含中文": true
+  },
+  "design_note": "强裸模型通过率 ≤30%：裸模型通常不知道 office-templates 的 CLI 契约，不知道四类非法输入应 exit 2 且零产物残留，甚至会编造错误信息或允许非法模板通过。SKILL.md §4/§7 明确列出四种非法输入与退出码 2。"
+}

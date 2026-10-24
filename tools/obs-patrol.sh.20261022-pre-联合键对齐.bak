@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+# obs-patrol.sh — G7 接线：巡检观测脚本。
+#
+# 职责（只读，不碰任何测量语义）：对 $AF_OBS_ROOT/runs 下「最近 $PATROL_HOURS 小时
+# 新增/变动」的 events.jsonl 逐个跑 obs-checker.py，按流分桶并汇总 PASS/FAIL 行，
+# 全部输出追加到 $PATROL_LOG（默认 工具状态备份/observability/patrol.log），
+# 同时打到 stdout（tee），cron 里把 stdout 另引一份即可。
+#
+# 分桶口径（防止"在飞流/归属歧义"造出假 FAIL）：
+#   PASS      = 已收尾入索引、run_id 在索引与批次清单中唯一、checker rc=0
+#   FAIL      = 同上但 checker rc≠0（真异常 → 安灯候选，FAIL 原因原样抄进日志）
+#   AMBIGUOUS = 该流已入索引，但 run_id 在索引多行/多份 manifest 中重名
+#               （checker 按 run_id 取首行，归属不唯一，FAIL 行含误配成分）
+#               → 照跑 checker 取诊断输出，但不计 PASS/FAIL，单列并标"归属存疑"
+#   INFLIGHT  = 24h 内新出现但未入索引且末行非 run_finished/correction（在飞/未收尾）
+#               → 按 obs-checker 入参形态 (c) 的既有口径（setup_failed/无观测流按跳过不判
+#                 fail），本脚本同样不判 fail，只记账
+#
+# 环境变量（均有缺省）：AF_OBS_ROOT / OBS_CHECKER / PATROL_HOURS / PATROL_LOG /
+#                     PATROL_LOCK / CHECK_TIMEOUT
+# 回滚 = 删本脚本 + 删 crontab 行（无需回滚任何既有件：脚本不写观测数据、不改 tools/ 现役件）。
+set -uo pipefail
+
+WS="/home/pan-ding/workspace/agent黑灯工厂"
+AF_OBS_ROOT="${AF_OBS_ROOT:-$WS/工具状态备份/observability}"
+OBS_CHECKER="${OBS_CHECKER:-$AF_OBS_ROOT/obs-checker.py}"
+PATROL_HOURS="${PATROL_HOURS:-24}"
+PATROL_LOG="${PATROL_LOG:-$AF_OBS_ROOT/patrol.log}"
+PATROL_LOCK="${PATROL_LOCK:-$WS/tools/.obs-patrol.lock}"
+CHECK_TIMEOUT="${CHECK_TIMEOUT:-180}"
+
+mkdir -p "$(dirname "$PATROL_LOG")"
+exec > >(tee -a "$PATROL_LOG") 2>&1
+
+# ---- 单实例锁（cron 每小时一轮，人工可随时手跑；重叠则跳过，不排队）----
+exec 9>"$PATROL_LOCK" || { echo "obs-patrol: 无法开锁文件 $PATROL_LOCK，退出"; exit 2; }
+if ! flock -n 9; then
+  echo "obs-patrol $(date -Is) | 已有实例在跑（lock=$PATROL_LOCK），本轮跳过"
+  exit 0
+fi
+
+echo "=================================================================="
+echo "=== obs-patrol 起 $(date '+%F %T') | as-of $(date -Is) | host=$(hostname) | window=${PATROL_HOURS}h"
+echo "=== root=$AF_OBS_ROOT"
+if [ ! -f "$OBS_CHECKER" ]; then
+  echo "obs-patrol: checker 不存在：$OBS_CHECKER —— 本轮未跑（不是 PASS）"
+  echo "=== 汇总: 候选=0 PASS=0 FAIL=0 AMBIGUOUS=0 INFLIGHT=0 | 退出码=2（checker 缺失）"
+  exit 2
+fi
+echo "=== checker=$OBS_CHECKER sha256=$(sha256sum "$OBS_CHECKER" | cut -c1-16)"
+if [ ! -d "$AF_OBS_ROOT/runs" ]; then
+  echo "obs-patrol: 事件流根目录不存在：$AF_OBS_ROOT/runs —— 本轮无候选"
+  echo "=== 汇总: 候选=0 PASS=0 FAIL=0 AMBIGUOUS=0 INFLIGHT=0 | 退出码=0"
+  exit 0
+fi
+
+# ---- 候选：最近 $PATROL_HOURS 小时内 mtime 变动过的 events.jsonl（按 mtime 升序）----
+# 用临时文件而非进程替换：find 的退出码必须拿到——候选发现失败会伪装成"候选=0 全绿"。
+CAND_RAW="$(mktemp "${PATROL_LOG}.raw.XXXXXX")"
+CAND_LIST="$(mktemp "${PATROL_LOG}.list.XXXXXX")"
+trap 'rm -f "$CAND_RAW" "$CAND_LIST" "${BUCKETS:-}"' EXIT
+if ! find "$AF_OBS_ROOT/runs" -type f -name events.jsonl -mmin -"$((PATROL_HOURS * 60))" \
+        -printf '%T@ %p\0' > "$CAND_RAW" 2>>"$PATROL_LOG"; then
+  echo "obs-patrol: find 候选发现失败（见本节上方 stderr）——本轮未跑，不是 PASS"
+  echo "=== 汇总: 候选=0 PASS=0 FAIL=0 AMBIGUOUS=0 INFLIGHT=0 ERROR=0 | 退出码=2（候选发现失败）"
+  exit 2
+fi
+sort -z -n "$CAND_RAW" | tr '\0' '\n' | sed 's/^[0-9.]* //' > "$CAND_LIST"
+CANDS=()
+while IFS= read -r line; do
+  [ -n "$line" ] && CANDS+=("$line")
+done < "$CAND_LIST"
+
+NCAND=${#CANDS[@]}
+echo "=== 候选事件流（${PATROL_HOURS}h 内新增/变动）=$NCAND"
+
+if [ "$NCAND" -eq 0 ]; then
+  echo "=== 汇总: 候选=0 PASS=0 FAIL=0 AMBIGUOUS=0 INFLIGHT=0 ERROR=0 | 退出码=0"
+  exit 0
+fi
+
+# ---- 分桶（python3 只做 JSON 归类，不改任何数据）----
+BUCKETS="$(mktemp "${PATROL_LOG}.cands.XXXXXX")"
+python3 - "$AF_OBS_ROOT" "${CANDS[@]}" <<'PY' > "$BUCKETS"
+import json, os, sys
+
+root, cands = sys.argv[1], sys.argv[2:]
+idxdir = os.path.join(root, "index")
+names = sorted(os.listdir(idxdir)) if os.path.isdir(idxdir) else []
+
+rows, mans = [], []
+for n in names:
+    if n.startswith("runs-") and n.endswith(".jsonl"):
+        try:
+            with open(os.path.join(idxdir, n), encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rows.append(json.loads(line))
+                    except Exception:
+                        pass          # 撕裂行：checker 侧同口径告警跳过
+        except OSError:
+            pass
+    elif n.startswith("batch-") and n.endswith(".manifest.json"):
+        try:
+            with open(os.path.join(idxdir, n), encoding="utf-8") as fh:
+                mans.append((n, json.load(fh)))
+        except Exception:
+            pass
+
+rp = lambda p: os.path.realpath(p) if isinstance(p, str) else ""
+
+for p in cands:
+    mine = [r for r in rows if rp(r.get("path")) == rp(p)]
+    if not mine:
+        last = ""
+        try:
+            with open(p, "rb") as fh:
+                ls = [x for x in fh.read().split(b"\n") if x.strip()]
+            for x in reversed(ls):
+                try:
+                    ev = json.loads(x)
+                    last = ev.get("kind", "") if isinstance(ev, dict) else ""
+                    break
+                except Exception:
+                    continue
+        except OSError as err:
+            print("ERROR\t%s\t读取失败: %s" % (p, err))
+            continue
+        if last in ("harness.run_finished", "harness.correction"):
+            print("CHECK\t%s\t已收尾但索引无对应行（漏登记/索引被删）" % p)
+        else:
+            print("INFLIGHT\t%s\t未入索引且末行 kind=%s（在飞/未收尾，不判 fail）"
+                  % (p, last or "不可解析"))
+        continue
+
+    rid = mine[0].get("run_id")
+    same = [r for r in rows if r.get("run_id") == rid]
+    hit = [n for n, m in mans if rid in (m.get("run_ids") or [])]
+    if len(same) > 1:
+        dirs = sorted({os.path.dirname(r.get("path", "")) for r in same})
+        print("AMBIGUOUS\t%s\trun_id=%s 在索引有 %d 行（%s）：checker 按 run_id 取首行会误配"
+              % (p, rid, len(same), " ; ".join(dirs[:4])))
+    elif len(hit) > 1:
+        print("AMBIGUOUS\t%s\trun_id=%s 命中 %d 份批次清单（%s）：manifest 归属存疑"
+              % (p, rid, len(hit), " ; ".join(hit[:4])))
+    else:
+        # 本流 run_id 唯一，但所属 manifest 的**同批其他 run** 若重名，
+        # merkle/计数聚合会多收 hash → 该流的 manifest 项判据同样被污染。
+        if not hit:
+            print("CHECK\t%s\t已收尾入索引（无批次清单覆盖，checker 记 WARN）" % p)
+            continue
+        mname = hit[0]
+        mbody = dict(mans).get(mname) or {}
+        dup_sib = sorted({r for r in (mbody.get("run_ids") or [])
+                          if len([x for x in rows if x.get("run_id") == r]) > 1})
+        if dup_sib:
+            print("AMBIGUOUS\t%s\t同批 manifest=%s 内 run_id 重名（%s）：merkle/计数聚合被污染"
+                  % (p, mname, " ; ".join(dup_sib[:4])))
+        else:
+            print("CHECK\t%s\t已收尾入索引（run_id 唯一、批次清单归属唯一）" % p)
+PY
+cls_rc=$?
+# 分类器自身失败（bug/权限/JSON 解析炸）必须显式暴露：静默 0/0 会被误读成"全绿"。
+if [ "$cls_rc" -ne 0 ] || [ ! -s "$BUCKETS" ]; then
+  echo "obs-patrol: 分桶失败（classifier rc=$cls_rc，桶文件行数=$(wc -l < "$BUCKETS")）——本轮未跑，不是 PASS"
+  echo "=== 汇总: 候选=$NCAND PASS=0 FAIL=0 AMBIGUOUS=0 INFLIGHT=0 ERROR=0 | 退出码=2（分桶失败）"
+  exit 2
+fi
+
+# ---- 逐流跑 checker ----
+n_pass=0; n_fail=0; n_amb=0; n_inflight=0; n_err=0; rc_all=0
+while IFS=$'\t' read -r bucket path reason; do
+  [ -z "${bucket:-}" ] && continue
+  short="${path#$AF_OBS_ROOT/}"
+  case "$bucket" in
+    INFLIGHT)
+      n_inflight=$((n_inflight + 1))
+      echo "--- [INFLIGHT] $short"
+      echo "    理由: $reason"
+      ;;
+    ERROR)
+      n_err=$((n_err + 1)); rc_all=1
+      echo "--- [ERROR] $short"
+      echo "    理由: $reason"
+      ;;
+    CHECK|AMBIGUOUS)
+      out="$(timeout "$CHECK_TIMEOUT" python3 "$OBS_CHECKER" "$path" 2>&1)"
+      rc=$?
+      if [ "$bucket" = CHECK ]; then
+        if [ "$rc" -eq 0 ]; then
+          n_pass=$((n_pass + 1))
+          echo "--- [PASS] $short"
+        else
+          n_fail=$((n_fail + 1)); rc_all=1
+          echo "--- [FAIL] $short"
+          echo "    理由: $reason；checker rc=$rc → 安灯候选"
+        fi
+      else
+        n_amb=$((n_amb + 1))
+        [ "$rc" -ne 0 ] && rc_all=1
+        echo "--- [AMBIGUOUS] $short"
+        echo "    理由: $reason；checker rc=$rc（诊断输出，其 FAIL 行含归属误配成分，不计 FAIL）"
+      fi
+      printf '%s\n' "$out" | grep -E '^\[obs-checker\] (汇总|/)|^  result:|^FAIL:|^WARN:|^  events=|^  sha256=' \
+        | sed 's/^/    | /'
+      ;;
+    *)
+      echo "--- [SKIP] $short （未知桶=$bucket）"
+      ;;
+  esac
+done < "$BUCKETS"
+
+[ "$n_fail" -gt 0 ] && echo "=== 提示: $n_fail 条流 checker 判 FAIL —— 安灯候选（原因见上方 FAIL 行）"
+[ "$n_amb" -gt 0 ] && echo "=== 提示: $n_amb 条流归属存疑（run_id 在索引/同批清单重名，checker 按 run_id 取首行会误配）——安灯候选：重跑批次的 run_id 应全局唯一"
+echo "=== 汇总: 候选=$NCAND PASS=$n_pass FAIL=$n_fail AMBIGUOUS=$n_amb INFLIGHT=$n_inflight ERROR=$n_err | 退出码=$rc_all"
+echo "=== obs-patrol 止 $(date '+%F %T')"
+exit "$rc_all"

@@ -1,0 +1,30 @@
+{
+  "created": "2026-10-22",
+  "note": "RSI诱导演练沙箱指纹登记表（闸1 冻结基准）。judge/env/image/bench 五项均从生产实物现采后登记；run_sample 记录 run 事件流实值。",
+  "judge_script": {
+    "path": "tools/swev-judge.py",
+    "sha256": "0338566c2f457496037c70f16504b0cfe9f5286c55ee2d67963428b00e7fc16a"
+  },
+  "obs_checker": {
+    "path": "工具状态备份/observability/obs-checker.py",
+    "sha256": "aaae9e53b906df225d9615abeb023262eedeedba016efbaad685f0fda213aa6e"
+  },
+  "judge_env": {
+    "method": "pip freeze --all | sort | join(no-trailing-newline) | sha256",
+    "sha256": "0a98efe3307134ff4217c4d3c600fb88241cd72e260d066a098bd9909215df41"
+  },
+  "judge_image": {
+    "ref": "swebench/sweb.eval.x86_64.pydata_1776_xarray-4075:latest",
+    "digest": "swebench/sweb.eval.x86_64.pydata_1776_xarray-4075@sha256:759683235601355e159d4d07c5cbe9d7f59c728ea53c955969312c8527811950",
+    "source": "repodigest"
+  },
+  "bench_binary": {
+    "path": "/home/pan-ding/afbuild-obs2/debug/afbench-obs4",
+    "sha256": "9f8beb1fc7011c4819a2ae79f55bb09fc6991f3430fc05a53d445c48da487251"
+  },
+  "run_sample": {
+    "task_json": "run-sample/task.json",
+    "task_sha256": "d40bd98de68eae96ffd11afac0d0c4cca53c1cd46979354db8e0b20752a0f684",
+    "run_id": "pydata__xarray-4075-a1"
+  }
+}

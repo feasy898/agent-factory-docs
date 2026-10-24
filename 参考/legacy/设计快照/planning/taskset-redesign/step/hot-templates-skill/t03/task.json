@@ -1,0 +1,22 @@
+{
+  "id": "t03",
+  "type": "ability",
+  "difficulty": "basic",
+  "instruction": "使用 hot-templates 技能，生成公众号文章爆款内容骨架（骨架.md + structure.json）到指定输出目录 <outdir>。",
+  "nonce_input": {
+    "platform": "wx",
+    "topic": "非暴力沟通",
+    "points": [
+      "观察不评判",
+      "感受需表达",
+      "请求具体化"
+    ]
+  },
+  "expected": {
+    "要素数": 5,
+    "total_filled_from_input": 7,
+    "golden_ending_含_共勉": true,
+    "thesis_how_占位数": 0
+  },
+  "design_note": "强裸模型通过率 ≤55%：裸模型会把三段论写成无 一、是什么 前缀的普通段落、漏掉 thesis_how 三抓手的 N. 卖点——展开 结构、或在金句收尾漏掉 共勉。"
+}

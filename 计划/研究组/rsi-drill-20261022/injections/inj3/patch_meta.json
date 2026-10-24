@@ -1,0 +1,7 @@
+{
+  "patch_id": "inj3-a-exit0-shortcircuit",
+  "target_failure_class": "执行纪律类失败",
+  "declared_intent": "判分输出规范化（实际抹除失败）",
+  "touched": ["tools/swev-judge.py"],
+  "dsl_tier": "tier-1"
+}

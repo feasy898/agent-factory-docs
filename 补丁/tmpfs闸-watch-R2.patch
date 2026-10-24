@@ -1,0 +1,61 @@
+--- a/tools/factory-watch.py
++++ b/tools/factory-watch.py
+@@ -23,6 +23,9 @@
+   red   A2  任一臂 零补丁或 gate 拦截占比>30%（≥10 行）（同 A1 归档豁免）
+   amber A3  某档案 ≥10 题已判分且通过数为 0
+   amber A4  anolis 任一巡检分区（/data、/）使用率>85%
++  amber A4L 本机 /tmp 可用 <2662MiB（usrquota 校准线 2.6GiB，D-24；statvfs 盘点失败
++            同码报「/tmp 盘点失败（fail-closed）」与写满文案强制区分；2252MiB 闸线
++            之下 factory-sched/mcode-dispatch 已自动拦新臂/新判分，安灯提前叫人）
+   amber A5  factory.log 尾部中继（relay）连续失败 ≥3（中间无一次 ok）
+   amber A6  调度器认为 running 的 bench 臂 30 分钟无新 results 行
+             （豁免：该臂 out 目录 runs/ 最新子目录 10 分钟内有写入——慢任务
+@@ -67,6 +70,13 @@
+ IMAGE_TARGET = 120
+ ARCHIVE_MATURITY_S = 6 * 3600  # results.jsonl mtime 超此龄且无关联在跑进程 → 臂归档（A1/A2 免报）
+ RELAY_FAIL_MIN = 3           # 连败阈值 → A5
++# A4L 本机 /tmp 安灯线（D-24，patch-tmpfs-alarm-watch-A4L-R2 / 方案 P1-1）：/tmp=
++# 7.5G tmpfs+usrquota，与判分结果/任务 json/调度器三件套共居；EDQUOT 实测于仅余
++# ~1.7G（mes500-根因报告.md:42）。校准线 2662MiB≈2.6GiB=factory-sched tmpfs 闸 WARN；
++# 闸线 2252MiB≈2.2GiB=factory-sched tmpfs_gate / mcode-dispatch probe_tmpfs 的
++# CLOSE——低于它自动拦新，安灯负责在闸线之前叫人。
++A4L_TMP_WARN_MB = 2662
++A4L_TMP_GATE_MB = 2252
+ 
+ PROFILES = ["glm-cp", "glm-cp-max", "kimi-k3", "step-5", "qwen30b-local", "mavis-m31f"]
+ TIERS = ["D1", "D2", "D3"]
+@@ -565,6 +575,16 @@
+     return archived, active
+ 
+ 
++def probe_local_tmp_mb():
++    """本机 /tmp 可用（MiB）。statvfs 本地读 f_bavail（tmpfs 无 root 保留，与 df 同值）。
++    异常 → (-1, True)=盘点失败（fail-closed 口径；与真写满同码 A4L:tmp 但文案强制区分）。"""
++    try:
++        st = os.statvfs("/tmp")
++        return st.f_bavail * st.f_frsize // 1048576, False
++    except Exception:
++        return -1, True
++
++
+ def build_alarms(arms, sched, anolis, relay, plan, state, t, extras=None, archived=None):
+     alarms = []
+ 
+@@ -616,6 +636,17 @@
+             add("amber", "A4", f"A4:{mnt}",
+                 f"anolis 分区 {mnt} 使用率 {d['use_pct']}%（{d['used']}/{d['size']}）> 85%", t)
+ 
++    # A4L 本机 /tmp（D-24，patch-tmpfs-alarm-watch-A4L-R2 / 方案 P1-1）：判分 results、
++    # swev 任务 json、调度器三件套全落本机 /tmp（tmpfs+usrquota）。<校准线报 amber；
++    # 盘点失败同码另文案。30min 去重由 log_alarms 的 alarm_logged 同款承担。
++    tmp_mb, tmp_fail = probe_local_tmp_mb()
++    if tmp_fail:
++        add("amber", "A4L:tmp", "A4L:tmp", "/tmp 盘点失败（fail-closed）", t)
++    elif tmp_mb < A4L_TMP_WARN_MB:
++        add("amber", "A4L:tmp", "A4L:tmp",
++            f"本机 /tmp 可用 {tmp_mb} MiB<{A4L_TMP_WARN_MB}MiB"
++            f"（usrquota 校准线，闸线 {A4L_TMP_GATE_MB}MiB，低于则 sched/mcode 拦新臂/新判分）", t)
++
+     # A5 中继连败
+     if relay["consecutive_failures"] >= RELAY_FAIL_MIN:
+         add("amber", "A5", "A5",

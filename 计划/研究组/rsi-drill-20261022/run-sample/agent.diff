@@ -1,0 +1,24 @@
+diff --git a/xarray/core/weighted.py b/xarray/core/weighted.py
+index 996d2e4c..f18a890f 100644
+--- a/xarray/core/weighted.py
++++ b/xarray/core/weighted.py
+@@ -1,5 +1,7 @@
+ from typing import TYPE_CHECKING, Hashable, Iterable, Optional, Union, overload
+ 
++import numpy as np
++
+ from .computation import dot
+ from .options import _get_keep_attrs
+ 
+@@ -140,7 +142,10 @@ class Weighted:
+         """ Calculate the sum of weights, accounting for missing values """
+ 
+         # we need to mask data values that are nan; else the weights are wrong
+-        mask = da.notnull()
++        # we use a float mask, so that the sum of boolean weights (which would
++        # otherwise be calculated as a boolean ``dot`` product) is not
++        # collapsed to a single boolean value
++        mask = da.notnull().astype(np.float64)
+ 
+         sum_of_weights = self._reduce(mask, self.weights, dim=dim, skipna=False)
+ 

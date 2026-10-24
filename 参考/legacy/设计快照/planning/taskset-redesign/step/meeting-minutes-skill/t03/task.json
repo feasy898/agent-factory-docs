@@ -1,0 +1,18 @@
+{
+  "id": "t03",
+  "type": "boundary",
+  "difficulty": "edge",
+  "instruction": "使用 meeting-minutes 技能，对下面的空转写稿（空字符串）生成三段式纪要到指定输出目录 <outdir>。重点验证空文件输入时技能必须合法产出三节皆空的 docx 与 summary 全 0，不报错。",
+  "nonce_input": {
+    "description": "直接传入空字符串，不依赖任何外部文件",
+    "transcript": ""
+  },
+  "expected": {
+    "决议事项": 0,
+    "待办事项": 0,
+    "风险与关注": 0,
+    "合计": 0,
+    "docx_openable": true
+  },
+  "design_note": "强裸模型通过率 ≤35%：裸模型往往在空输入时直接报错或停止，而 SKILL.md:77 明确规定空文件/全噪声输入不报错，必须产出三节皆空且 summary 全 0 的合法 docx。"
+}

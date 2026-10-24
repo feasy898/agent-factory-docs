@@ -1,0 +1,20 @@
+# delete-candidates（删集候选）— anolis 核对版 GC 2026-10-23
+# 生成：build_lists.py（只读盘点，ssh anolis docker images/ps/inspect + 本机任务池清单）
+# 口径：删集 = (池 − 保留三源并集) ∩ 白名单 ^swebench/sweb\.eval\.x86_64\.[a-z0-9_-]+_1776_.+:latest$
+#
+# 结果：删集 = 0 张。
+# 原因：保留源 B②（/tmp/longcat-relay/all120.txt ∪ recovery-d.txt ∪ done-recovery.txt，
+#       共 120 名）与池内 120 个白名单镜像【集合完全相等】（双向差集为空，见 build_lists.py
+#       输出 "pool swebench − B2: []" 与 "B2 − pool: []"）。恢复中继 2026-10-23 01:34:17
+#       收尾（relay-recovery.log: "recovery round1 end: done=70 failed=0 remaining=0"、
+#       "RELAY-RECOVERY-DONE.flag written, coverage=122/120"）后，anolis 白名单池即 longcat
+#       D1/D2/D3 全量任务池本身；A（在飞 4 容器）、B①（T0 五件）、B③（采样聚合 9 题 +
+#       D-33 宽并集 56 张）全部 ⊆ all120。白名单外 3 个镜像按规定只计数永不删。
+#
+# 白名单外（foreign，只计数）：
+#   python:3.12-slim                                                              179MB   无 _1776_ 厂标
+#   docker.1ms.run/swebench/sweb.eval.x86_64.sympy_1776_sympy-13877:latest        3.94GB  与在保镜像同 ID（e8c37ba67508）双 tag；不匹配 ^swebench/ 正则
+#   docker.1ms.run/swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-7462:latest   4.05GB  与在保镜像同 ID（b7919ea5c177）双 tag；不匹配 ^swebench/ 正则
+# 注：两个 docker.1ms.run tag 即使删除也只做 untag（同 ID 仍被 swebench/ tag 引用），回收 0 字节。
+#
+# （无删集行——本文件即空删集的证据件）

@@ -1,0 +1,40 @@
+{
+  "id": "t05",
+  "type": "boundary",
+  "difficulty": "edge",
+  "instruction": "使用 hot-templates 技能，分别对以下四组输入（points=[]）各执行一次生成，产物写入同一输出目录的四个子目录（dy/ xhs/ wx/ video）。重点验证零卖点时各平台占位符的正确落位与 open_placeholders 计数。",
+  "nonce_input": {
+    "description": "四平台零卖点输入，内嵌。注意一次一跑，共四次执行。",
+    "cases": [
+      {
+        "platform": "dy",
+        "topic": "居家哑铃入门",
+        "points": []
+      },
+      {
+        "platform": "xhs",
+        "topic": "租房避坑指南",
+        "points": []
+      },
+      {
+        "platform": "wx",
+        "topic": "非暴力沟通",
+        "points": []
+      },
+      {
+        "platform": "video",
+        "topic": "居家哑铃入门",
+        "points": []
+      }
+    ]
+  },
+  "expected": {
+    "dy_open": 6,
+    "xhs_open": 7,
+    "wx_open": 10,
+    "video_open": 18,
+    "wx_total_filled_from_input": 4,
+    "video_shot_3_5_extra_value_count": 6
+  },
+  "design_note": "强裸模型通过率 ≤40%：裸模型会把零卖点处理成空字符串而不是 【占位:价值点N】、漏掉 xhs summary_block 的占位复述、或不知道 wx 的 total_filled_from_input 在零卖点时应为 4。"
+}

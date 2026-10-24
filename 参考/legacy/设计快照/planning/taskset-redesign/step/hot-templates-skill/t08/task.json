@@ -1,0 +1,31 @@
+{
+  "id": "t08",
+  "type": "trap",
+  "difficulty": "hard",
+  "instruction": "使用 hot-templates 技能，对下面两组非法输入分别执行一次生成，观察退出码、stderr 与输出目录是否被创建。",
+  "nonce_input": {
+    "description": "两组非法输入，内嵌",
+    "cases": [
+      {
+        "platform": "bilibili",
+        "topic": "测试",
+        "points": [
+          "a"
+        ]
+      },
+      {
+        "platform": "dy",
+        "topic": "  ",
+        "points": [
+          "a"
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "每组退出码": 2,
+    "产物残留数": 0,
+    "stderr_含错误标记": true
+  },
+  "design_note": "强裸模型通过率 ≤30%：裸模型不知道 hot-templates 的 CLI 契约（仅四 platform 合法、topic strip 后非空），会尝试生成或编造产物。SKILL.md §3.1/§4 明确 illegal platform exit 2、空白 topic exit 2。"
+}

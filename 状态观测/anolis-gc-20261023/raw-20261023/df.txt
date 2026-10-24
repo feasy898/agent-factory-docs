@@ -1,0 +1,5 @@
+Filesystem     1024-blocks      Used Available Capacity Mounted on
+/dev/vdb1        308519744 275640340  17134484      95% /data
+/dev/vda3        101985852  78095072  19523128      81% /
+
+$ df -P /data /

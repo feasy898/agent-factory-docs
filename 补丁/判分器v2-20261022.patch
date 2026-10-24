@@ -1,0 +1,34 @@
+# 补丁：判分器 v2 接线开关（cb-judge.sh 增加可选 SWEV_JUDGE=v2，默认仍 v1）
+# 日期：2026-10-22  身份：修理组子代理（D-32 判分链三缺陷修复单，step-5-preview 载体）
+# 缘起：债册 D-32（红队裁决 R4/R5/R7）——①log_parsed 零状态语义（测试未跑与真失败同貌）；
+#      ②判分器非密闭（make_test_spec 每判实呼 raw.githubusercontent.com，网络抖动即崩、
+#      49 null 键无归因）；③capture_diff 把 ssh 取证错误残片（63B CRLF）当补丁。
+#      修复版另存 tools/swev-judge-v2.py（与现役 v1 字节级并存，v1 sha256 0338566c… 零改动，
+#      RSI 冻结基线与 L1 证据链锚不动）。
+# 改动：仅 cb-judge.sh 第 3 步判分调用加一个环境变量开关——SWEV_JUDGE=v2 时切换判分器，
+#       缺省/其它值一律 v1（字节可比性优先，厂长 2026-10-22 14:5x 决策）。v2 需离线缓存
+#       预热：SWEV_JUDGE_V2_ALLOW_LIVE=1 跑一次 --warm-cache（或首判放行一次）后，
+#       后续默认离线判分（禁外呼，缓存未命中即 hermeticity_blocked 留痕）。
+# 影响面：不改任何判分语义默认值；不碰 af judge.rs / swev.rs / truth-* 编排（v2 接入 af 线
+#       待配对评估后另行派单）。回滚一行见下。
+# 应用：cd 工作区根 && patch -p0 < 补丁/判分器v2-20261022.patch
+# 回滚（一行）：patch -p0 -R < 补丁/判分器v2-20261022.patch
+#   （或：git checkout -- tools/cb-judge.sh；cb-judge.sh 属工作区文件非 af 仓库件）
+---
+--- tools/cb-judge.sh	2026-10-22 14:46:54.312682122 +0800
++++ tools/cb-judge.sh	2026-10-22 14:46:54.320955236 +0800
+@@ -22,5 +22,12 @@
+ # 2) 跑官方 eval_script（内含 test_patch 应用与 pytest）
+ python3 -c "import json,sys;sys.stdout.write(json.load(open('$TASK_JSON'))['eval_script'])" \
+   | timeout 1250 docker exec -i "$CT" bash -s > "$OUT/eval.log" 2>&1 || true
+-# 3) 官方判分
+-/home/pan-ding/swev-venv/bin/python /home/pan-ding/workspace/agent黑灯工厂/tools/swev-judge.py "$TASK_JSON" "$OUT/eval.log" "$PATCH" | tee "$OUT/judge.json"
++# 3) 官方判分（默认 v1 判分核；SWEV_JUDGE=v2 切换到 D-32 修复版 swev-judge-v2.py）
++#    v2 与 v1 并存且字节互不影响：v2 修 R4 零状态语义/R5 判分密闭（离线缓存，
++#    SWEV_JUDGE_V2_CACHE 可指缓存目录，冷缓存需先 SWEV_JUDGE_V2_ALLOW_LIVE=1 预热）
++#    /R7 diff 残片拒判；v1 保持默认，字节可比性优先（厂长 2026-10-22 14:5x 决策）。
++JUDGE_PY=/home/pan-ding/workspace/agent黑灯工厂/tools/swev-judge.py
++if [ "${SWEV_JUDGE:-v1}" = "v2" ]; then
++  JUDGE_PY=/home/pan-ding/workspace/agent黑灯工厂/tools/swev-judge-v2.py
++fi
++/home/pan-ding/swev-venv/bin/python "$JUDGE_PY" "$TASK_JSON" "$OUT/eval.log" "$PATCH" | tee "$OUT/judge.json"

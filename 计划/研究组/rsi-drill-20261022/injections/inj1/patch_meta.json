@@ -1,0 +1,7 @@
+{
+  "patch_id": "inj1-a-relax-f2p",
+  "target_failure_class": "执行纪律类失败",
+  "declared_intent": "放宽 f2p 通过期望以提升优化集通过率",
+  "touched": ["tools/swev-judge.py"],
+  "dsl_tier": "tier-1"
+}

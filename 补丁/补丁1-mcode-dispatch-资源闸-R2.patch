@@ -1,0 +1,456 @@
+# 补丁①（修订版R2）mcode-dispatch 资源闸：拦新不杀旧 + 推迟升级通道
+# 日期: 2026-10-22  实施人: 补丁实施员（SRE）
+# 内容: ① tools/mcode-dispatch.py —— ResourceGate 三条件闸（本机内存/本机docker分区/
+#        anolis /data，60s缓存，阈值环境变量可覆盖）+ worker 顶部推迟（任务不出队、
+#        不写 phase、不烧 attempts、600s 刷心跳）+ 1800s 升级三通道（klog ALARM +
+#        MES kind=mcode_defer_stalled + deferred.log，同期一次）+ 86400s 停取等人工 +
+#        defer-state.json 重启接续 + disk_ok 升级 fail-closed + once 横幅放行 +
+#        gate-check 子命令（0=开/4=闭）。
+#       ② tools/mcode-once-wrapper.sh —— 新增文件：无人值守补跑硬闸，闸闭拒绝 exit 4。
+# 语义: fail-closed（内存读数异常放行除外——单题 25m/30m 双超时兜底）；只拦新不杀旧；
+#        现役进程不受影响，新代码自下次重启生效。
+# 安装: 已原子落位于工作区（本文件为存档）。重放: cd /home/pan-ding/workspace/agent黑灯工厂
+#        && patch -p1 < 补丁/补丁1-mcode-dispatch-资源闸-R2.patch（会新建②）。
+# 回滚(一行): cd /home/pan-ding/workspace/agent黑灯工厂 && cp 工具状态备份/mcode-dispatch.py.pre-patch1-R2 tools/mcode-dispatch.py && rm -f tools/mcode-once-wrapper.sh
+# 单测: python3 补丁/patch1-test-gate.py（29/29 PASS，2026-10-22 02:41）
+---
+--- a/tools/mcode-dispatch.py
++++ b/tools/mcode-dispatch.py
+@@ -19,6 +19,39 @@
+ 资源纪律：mcode 并发 ≤2 实例（红线 ≤3）；判分串行（cal2 教训：判分须安静防 OOM 假失败，
+ 满足 ≤2 红线）；anolis /data 余量 <4G 熔断等待；配额熔断按 profile 独立（m31f 免费 / m3 套餐）。
+ 
++资源闸（补丁① R2，2026-10-22）：worker 循环顶部先 probe 三条件，闸闭则任务不出队。
++60s 缓存对齐 factory-sched mem_gate 先例；阈值/时限全部可用环境变量覆盖（调参不改码）：
++  a. 本机内存：/proc/meminfo MemAvailable < GATE_MEM_MIN_GB（默认 4GiB，判分容器峰值
++     ~889MiB/题、4 倍余量）→ 推迟。本地读取解析（绝不把 awk 程序经 ssh 传远端——
++     sched mem_gate 的引号永闭教训）；读数异常属进程环境故障：记日志放行（单题有
++     25m/30m 双超时兜底，不因读数故障停产）。
++  b. 本机磁盘：docker data root 所在分区可用 < GATE_DISK_MIN_GB（默认 20GiB）→ 推迟
++     （判分容器与 judge.json/eval.log 写在本地）；statvfs 判不准 → 推迟（fail-closed）。
++  c. anolis REMOTE_ROOT 余量 < GATE_REMOTE_MIN_GB（默认同 DISK_MIN_GB=4G）或不可达/
++     判不准 → 推迟（fail-closed，先例=sched 磁盘闸 2026-10-20 22:21 闪断放行教训；
++     本条升级原 disk_ok 的「判不准不拦」）。tailnet/ssh 闪断（复发模态）下旧行为=
++     prepare_failed 显性爆发并烧 attempts，新行为=进入带升级通道的推迟。
++推迟语义（拦新不杀旧）：闸闭期间任务永不出队（无重排队逻辑，在飞 solve 自然收尾）；
++不写 phase（不污染 summary）、不调 _note_failure（不烧 attempts）；每 DEFER_HB_S
++（600s）刷一次 heartbeat——keepalive 判据是 heartbeat mtime<2400s（factory-keepalive
++check_mcode_dispatch），推迟期必须呈现「活的、在推迟的」而非失联误判重启。连续推迟
++>DEFER_ESCALATE_S（1800s）→ 升级（同一次连续推迟期只升一次，escalated 旗标，闸解除
++复位）：klog(/tmp/mcode-dispatch.log) ALARM + MES kind=mcode_defer_stalled（直 INSERT
++af_mes.mes_event，写失败不致命）+ deferred.log 追加摘要。连续推迟 >DEFER_HALT_S
++（86400s）→ worker 停取新任务、保持升级态等人工（心跳照刷防 keepalive 误判重启；
++资源恢复闸开即自动复位恢复取任务；如需彻底停产由人工 kill 并同步处置 keepalive 侧）。
++连续推迟时长跨重启接续：进程内 + /tmp/mcode-dispatch/defer-state.json（重启后新进程
++读到旧起始时刻继续计时，escalated 同期不重复升级）。watch 安灯对 mcode 零可见性，
++接入为二期可选项；当前靠 klog+MES+deferred.log 三通道可达人工巡检。
++残余竞态：取任务之后、prepare 之前闸才闭的窗口内，run_one 既有预检 disk_ok（本补丁
++起 fail-closed）等待 300s 后仍未恢复，则走既有失败重试路径（每进程每任务 ≤3 次），
++再下一次取任务即被闸拦住。
++环境变量：MCODE_GATE_MEM_MIN_GB / MCODE_GATE_DISK_MIN_GB / MCODE_GATE_REMOTE_MIN_GB /
++MCODE_GATE_CACHE_S / MCODE_DEFER_HB_S / MCODE_DEFER_ESCALATE_S / MCODE_DEFER_HALT_S。
++exit 码语义：run 双实例守卫 exit 3（single_instance，保持不动）；gate-check 闸闭 exit 4；
++tools/mcode-once-wrapper.sh（无人值守补跑硬闸）闸闭拒绝 exit 4；once 本体不拦人工补跑
++（人工知情动作）——闸闭只打横幅警告并写 deferred.log，照常执行。
++
+ 断点续跑：state.json 记 (task|profile) → phase；daemon 重启后跳过已 judged 行，
+ 未完成态按 phase 续跑。order：D1 全部 → D2 → D3，每题先 m31f 后 m3。
+ 
+@@ -38,9 +71,11 @@
+ 
+ 用法:
+   mcode-dispatch.py run                  # 常驻：跑完 120×2 题后退出
+-  mcode-dispatch.py once <tid> <profile> # 单题单档案端到端（验收/补跑）
++  mcode-dispatch.py once <tid> <profile> # 单题单档案端到端（验收/补跑；闸闭仅横幅放行）
+   mcode-dispatch.py summary              # 看板：分档×分档案通过率 + 在途
+   mcode-dispatch.py deploy               # 只部署 anolis 侧 helpers（调试用）
++  mcode-dispatch.py gate-check           # 只读探测资源闸（0=开 / 4=闭）
++  tools/mcode-once-wrapper.sh <tid> <profile>  # 无人值守补跑硬闸：闸闭拒绝 exit 4
+ 
+ 密钥纪律：本机不落任何令牌；anolis 侧 auth-sync.py 只写哈希与 ID，不落令牌明文。
+ """
+@@ -52,6 +87,8 @@
+ import sys
+ import threading
+ import time
++import urllib.parse
++import urllib.request
+ 
+ WS = "/home/pan-ding/workspace/agent黑灯工厂"
+ PLAN = f"{WS}/计划/s1-swev-120.json"
+@@ -78,6 +115,19 @@
+ MAX_ATTEMPTS = 3             # 每进程内同一 (task,profile) 最大尝试次数（2026-10-22：失败不再一次判死）
+ RETRY_DELAY = 60             # 重试间隔（秒）
+ 
++# ---- 补丁① R2：资源闸常量（阈值/时限全部环境变量可覆盖，便于调参不改码）----
++GATE_MEM_MIN_GB = float(os.environ.get("MCODE_GATE_MEM_MIN_GB", "4"))
++GATE_DISK_MIN_GB = float(os.environ.get("MCODE_GATE_DISK_MIN_GB", "20"))
++GATE_REMOTE_MIN_GB = float(os.environ.get("MCODE_GATE_REMOTE_MIN_GB", str(DISK_MIN_GB)))
++GATE_CACHE_S = float(os.environ.get("MCODE_GATE_CACHE_S", "60"))
++DEFER_HB_S = float(os.environ.get("MCODE_DEFER_HB_S", "600"))
++DEFER_ESCALATE_S = float(os.environ.get("MCODE_DEFER_ESCALATE_S", "1800"))
++DEFER_HALT_S = float(os.environ.get("MCODE_DEFER_HALT_S", "86400"))
++DEFER_STATE_FILE = f"{STATE_ROOT}/defer-state.json"
++DEFERRED_LOG = f"{STATE_ROOT}/deferred.log"
++CH = "http://127.0.0.1:5221"     # MES ClickHouse（factory-keepalive 同款直 INSERT）
++DOCKER_ROOT = "/var/lib/docker"  # docker info 不可用时的兜底 data root
++
+ # ---------------- anolis 侧 helpers（每次启动重新部署，幂等） ----------------
+ 
+ AUTH_SYNC = '''#!/usr/bin/env python3
+@@ -250,6 +300,211 @@
+     os.replace(tmp, STATE_FILE)
+ 
+ 
++class ResourceGate:
++    """资源闸（补丁① R2）：三条件探测 + 推迟簿记 + 升级通道。进程级单例（GATE），
++    两个 worker 共用 60s 缓存。fail-closed 口径：内存读数异常放行（双超时兜底），
++    本地磁盘/anolis 判不准或不可达一律闭闸（先例见模块 docstring 与 factory-sched
++    disk_gate 2026-10-20 22:21 闪断放行教训）。"""
++
++    def __init__(self):
++        self._lock = threading.Lock()
++        self._at = 0.0            # 上次探测时刻（GATE_CACHE_S 缓存）
++        self._ok = True
++        self._why = []
++        self.defer_since = None   # 连续推迟起点（epoch），闸开复位
++        self.escalated = False    # 本次推迟期已升级旗标（同期只升一次）
++        self.halted = False       # 连续推迟 >DEFER_HALT_S：停取新任务保持升级态
++        self._last_hb = 0.0
++        self._load_defer_state()  # 重启接续：读到旧起始时刻继续计时
++
++    # ---- 三探针（独立可 mock，供单测）----
++    @staticmethod
++    def probe_mem():
++        """本机 MemAvailable（GiB）。本地读取解析；异常不拦（放行，返回 err 供日志）。"""
++        try:
++            with open("/proc/meminfo", encoding="ascii") as f:
++                for line in f:
++                    if line.startswith("MemAvailable:"):
++                        return float(line.split()[1]) / 1048576.0, None
++        except Exception as e:
++            return -1.0, f"本机 MemAvailable 读数异常（放行，双超时兜底）: {e}"
++        return -1.0, "本机 MemAvailable 字段缺失（放行，双超时兜底）"
++
++    @staticmethod
++    def probe_disk():
++        """本机 docker data root 所在分区可用（GiB）。statvfs 判不准=闸闭（fail-closed）。"""
++        root = DOCKER_ROOT
++        try:
++            r = subprocess.run(["docker", "info", "-f", "{{.DockerRootDir}}"],
++                               capture_output=True, text=True, timeout=10,
++                               stdin=subprocess.DEVNULL)
++            d = (r.stdout or "").strip()
++            if r.returncode == 0 and d:
++                root = d
++        except Exception:
++            pass  # docker CLI 不可用 → 退回默认路径 statvfs
++        try:
++            st = os.statvfs(root)
++            return st.f_bavail * st.f_frsize / 1073741824.0, None, root
++        except Exception as e:
++            return -1.0, f"本机磁盘 {root} statvfs 失败（fail-closed）: {e}", root
++
++    @staticmethod
++    def probe_remote():
++        """anolis REMOTE_ROOT 可用（GiB）与可达性。不可达/判不准=闸闭（fail-closed）。"""
++        try:
++            r = ssh(f"df -BG --output=avail {REMOTE_ROOT} | tail -1", timeout=60)
++            return float(r.stdout.strip().rstrip("G")), None
++        except Exception as e:
++            return -1.0, (f"anolis {REMOTE_ROOT} 不可达/判不准（fail-closed，"
++                          f"tailnet/ssh 闪断按推迟处理）: {type(e).__name__}")
++
++    def probe(self):
++        """三条件合并探测，GATE_CACHE_S 缓存。返回 (ok, reasons)。
++
++        探测在锁内串行（双 worker 共享一次结果，防缓存过期瞬间的并发 ssh 风暴，
++        同 mem_gate/disk_gate 缓存防风暴意图）。"""
++        now = time.time()
++        with self._lock:
++            if now - self._at < GATE_CACHE_S:
++                return self._ok, list(self._why)
++            ok, why = True, []
++            avail, err = self.probe_mem()
++            if err:
++                log(f"[gate] {err}")
++            elif avail < GATE_MEM_MIN_GB:
++                ok = False
++                why.append(f"本机 MemAvailable {avail:.1f}G < {GATE_MEM_MIN_GB}G")
++            free, err, root = self.probe_disk()
++            if err:
++                ok = False
++                why.append(err)
++            elif free < GATE_DISK_MIN_GB:
++                ok = False
++                why.append(f"本机 docker 分区({root}) {free:.0f}G < {GATE_DISK_MIN_GB}G")
++            free_r, err_r = self.probe_remote()
++            if err_r:
++                ok = False
++                why.append(err_r)
++            elif free_r < GATE_REMOTE_MIN_GB:
++                ok = False
++                why.append(f"anolis {REMOTE_ROOT} {free_r:.0f}G < {GATE_REMOTE_MIN_GB}G")
++            self._at, self._ok, self._why = now, ok, why
++            return ok, list(why)
++
++    # ---- 推迟簿记（闸闭期间由 worker 周期调用）----
++    def _load_defer_state(self):
++        try:
++            d = json.load(open(DEFER_STATE_FILE))
++            self.defer_since = float(d["since"])
++            self.escalated = bool(d.get("escalated", False))
++            self.halted = bool(d.get("halted", False))
++        except Exception:
++            pass  # 无文件/坏文件=新推迟期处理
++
++    def _save_defer_state(self):
++        try:
++            os.makedirs(STATE_ROOT, exist_ok=True)
++            tmp = DEFER_STATE_FILE + ".tmp"
++            with open(tmp, "w") as f:
++                json.dump({"since": self.defer_since, "escalated": self.escalated,
++                           "halted": self.halted,
++                           "updated": time.strftime("%F %T")}, f)
++            os.replace(tmp, DEFER_STATE_FILE)
++        except Exception as e:
++            log(f"[gate] defer-state.json 写失败（不致命）: {e}")
++
++    def defer_tick(self):
++        """闸闭期间维护连续推迟时长、DEFER_HB_S 心跳、升级与停取。
++
++        返回 "run"（继续等）或 "halt"（停取新任务保持升级态等人工）。
++        不写 phase、不调 _note_failure——推迟不烧 attempts、不污染 summary。"""
++        with self._lock:
++            now = time.time()
++            if self.defer_since is None:
++                self.defer_since = now
++                self.escalated = self.halted = False
++                self._save_defer_state()
++                log(f"[gate] 进入推迟：{'；'.join(self._why) or '原因未记录'}；任务留在队列，"
++                    f"每 {DEFER_HB_S:.0f}s 刷心跳，>{DEFER_ESCALATE_S/60:.0f}min 升级")
++            defer_s = now - self.defer_since
++            if now - self._last_hb >= DEFER_HB_S:
++                self._last_hb = now
++                os.makedirs(STATE_ROOT, exist_ok=True)
++                with open(HEARTBEAT, "w") as f:
++                    f.write(time.strftime("%F %T") + "\n")
++                log(f"deferring(since={time.strftime('%F %T', time.localtime(self.defer_since))}, "
++                    f"连续 {defer_s/60:.0f}min)")
++            if not self.escalated and defer_s > DEFER_ESCALATE_S:
++                self.escalated = True
++                self._save_defer_state()
++                self._escalate(defer_s)
++            if not self.halted and defer_s > DEFER_HALT_S:
++                self.halted = True
++                self._save_defer_state()
++                log(f"ALARM 连续推迟 {defer_s/3600:.1f}h > {DEFER_HALT_S/3600:.0f}h："
++                    f"worker 停取新任务、保持升级态等人工（心跳照刷，资源恢复即自动复位）")
++            return "halt" if self.halted else "run"
++
++    def _escalate(self, defer_s):
++        """升级三通道：klog ALARM + MES kind=mcode_defer_stalled + deferred.log。"""
++        reasons = "；".join(self._why) or "原因未记录"
++        log(f"ALARM mcode-dispatch 连续推迟 {defer_s/60:.0f}min > {DEFER_ESCALATE_S/60:.0f}min"
++            f"（同期仅此一次），闸闭原因：{reasons}；请人工介入，摘要见 {DEFERRED_LOG}")
++        try:
++            os.makedirs(STATE_ROOT, exist_ok=True)
++            with open(DEFERRED_LOG, "a") as f:
++                f.write(f"{time.strftime('%F %T')} ESCALATED 连续推迟 {defer_s/60:.0f}min "
++                        f"原因: {reasons}\n")
++        except Exception as e:
++            log(f"[gate] deferred.log 写失败（不致命）: {e}")
++        self.mes_event("mcode_defer_stalled")
++
++    @staticmethod
++    def mes_event(kind):
++        """直 INSERT af_mes.mes_event（复用 factory-keepalive mes_event 模式）；
++        CH 写失败不致命——不阻塞闸逻辑。"""
++        body = json.dumps({
++            "work_order_id": "mcode-dispatch",
++            "occurred_at": time.strftime("%F %T"),
++            "event_id": f"mcode-dispatch-{kind}-{int(time.time())}-{os.getpid()}",
++            "line_id": "mcode-dispatch",
++            "station_id": "mcode-dispatch",
++            "kind": kind,
++            "quantity": 1,
++        }, ensure_ascii=False) + "\n"
++        req = urllib.request.Request(
++            CH + "/?query=" + urllib.parse.quote(
++                "INSERT INTO af_mes.mes_event (work_order_id, occurred_at, event_id, "
++                "line_id, station_id, kind, quantity) FORMAT JSONEachRow"),
++            data=body.encode(), method="POST")
++        try:
++            with urllib.request.urlopen(req, timeout=15) as r:
++                r.read()
++        except Exception as e:
++            log(f"[gate] MES 写入失败（不致命）: {e}")
++
++    def opened(self):
++        """闸由闭转开：复位推迟期（escalated/halted 复位、defer-state.json 清除）。"""
++        with self._lock:
++            if self.defer_since is None:
++                return
++            dur = time.time() - self.defer_since
++            log(f"[gate] 推迟解除（连续 {dur/60:.0f}min），escalated/halted 复位，恢复取任务")
++            self.defer_since = None
++            self.escalated = self.halted = False
++            self._last_hb = 0.0
++            try:
++                os.remove(DEFER_STATE_FILE)
++            except FileNotFoundError:
++                pass
++            except Exception as e:
++                log(f"[gate] defer-state.json 清除失败（不致命）: {e}")
++
++
++GATE = ResourceGate()  # 进程级单例：worker 共用缓存；once/gate-check 复用同一逻辑
++
++
+ class Dispatcher:
+     def __init__(self):
+         self.plan = json.load(open(PLAN))
+@@ -265,6 +520,7 @@
+         self.attempts_lock = threading.Lock()
+         self.judge_lock = threading.Lock()
+         self.state_lock = threading.Lock()
++        self.gate = GATE            # 补丁① R2：进程级单例资源闸（worker 共用 60s 缓存）
+         self.stop = threading.Event()
+ 
+     # ---- state helpers ----
+@@ -294,11 +550,15 @@
+             "&& chmod 755 $HOME/mcode-swev/repo-cache.sh", check=True)
+ 
+     def disk_ok(self):
+-        r = ssh(f"df -BG --output=avail {REMOTE_ROOT} | tail -1")
++        """anolis /data 余量预检（run_one 内、prepare rm -rf 之前的既有位置，保持不动）。
++        补丁① R2 升级语义：判不准/不可达=不足（fail-closed），不再「判不准不拦」——
++        先例=factory-sched 磁盘闸 2026-10-20 22:21 闪断放行教训。worker 循环顶部的
++        资源闸已把不可达期间的取任务拦在队外，此处兜住取任务后才闪断的残余窗口。"""
+         try:
++            r = ssh(f"df -BG --output=avail {REMOTE_ROOT} | tail -1")
+             return float(r.stdout.strip().rstrip("G")) >= DISK_MIN_GB
+         except Exception:
+-            return True  # 判不准不拦
++            return False  # 补丁① R2：判不准不拦 → 判不准按不足处理（fail-closed）
+ 
+     def ensure_repo(self, repo):
+         """确保 anolis 侧仓库缓存完整可用（repo-cache.sh：flock 串行 + 毒缓存自清理）。"""
+@@ -493,6 +753,16 @@
+ 
+     def worker(self, q):
+         while not self.stop.is_set():
++            # 补丁① R2：取任务前先过资源闸——闸闭则任务永不出队（无重排队逻辑），
++            # 在飞 solve 不经预检、自然收尾后资源回落自动解除。推迟不写 phase、
++            # 不调 _note_failure（不烧 attempts）。defer_tick 返回 "halt"（连续推迟
++            # >DEFER_HALT_S）时同样不取：停取新任务保持升级态等人工，心跳照刷。
++            ok, _why = self.gate.probe()
++            if not ok:
++                self.gate.defer_tick()
++                time.sleep(60)
++                continue
++            self.gate.opened()
+             try:
+                 tid, prof = q.get(timeout=5)
+             except Exception:
+@@ -550,6 +820,9 @@
+     d.deploy()
+     log(f"mcode-dispatch 常驻启动 pid={os.getpid()} workers={MCODE_WORKERS} "
+         f"quota0={d.quota}")
++    log(f"[gate] 资源闸生效: mem≥{GATE_MEM_MIN_GB}G disk≥{GATE_DISK_MIN_GB}G "
++        f"remote≥{GATE_REMOTE_MIN_GB}G cache={GATE_CACHE_S:.0f}s "
++        f"hb={DEFER_HB_S:.0f}s escalate>{DEFER_ESCALATE_S:.0f}s halt>{DEFER_HALT_S:.0f}s")
+     tiers = set(args.tiers.split(",")) if args.tiers else None
+     q = d.build_queue(tiers=tiers)
+     threads = [threading.Thread(target=d.worker, args=(q,), daemon=True,
+@@ -567,6 +840,20 @@
+ 
+ 
+ def cmd_once(args):
++    # 补丁① R2：once 本体不拦人工补跑（人工知情动作）——闸闭只横幅警告 + deferred.log。
++    # 硬拒绝（exit 4）在 tools/mcode-once-wrapper.sh（无人值守调用方应走 wrapper）。
++    ok, why = GATE.probe()
++    if not ok:
++        reasons = "；".join(why)
++        print(f"⚠ 资源闸闭，once 照跑（人工知情放行）：{reasons}", file=sys.stderr)
++        log(f"once {args.tid}|{args.profile} 闸闭照跑（人工知情）: {reasons}")
++        try:
++            os.makedirs(STATE_ROOT, exist_ok=True)
++            with open(DEFERRED_LOG, "a") as f:
++                f.write(f"{time.strftime('%F %T')} once-manual 闸闭照跑 "
++                        f"{args.tid}|{args.profile}: {reasons}\n")
++        except Exception:
++            pass
+     d = Dispatcher()
+     d.deploy()
+     if args.tid not in d.tasks:
+@@ -574,6 +861,17 @@
+     d.run_one(args.tid, args.profile)
+ 
+ 
++def cmd_gatecheck(_args):
++    """只读探测资源闸（供 mcode-once-wrapper.sh 与人工巡检）。exit 0=开，4=闭。"""
++    ok, why = GATE.probe()
++    if ok:
++        print("GATE OPEN（三条件全过：本机内存/本机docker分区/anolis /data）")
++        return
++    for w in why:
++        print(f"GATE CLOSED: {w}", file=sys.stderr)
++    sys.exit(4)
++
++
+ def cmd_deploy(_args):
+     Dispatcher().deploy()
+     print("helpers 已部署到 anolis:~/mcode-swev/")
+@@ -640,9 +938,11 @@
+     o.add_argument("profile", choices=list(PROFILES))
+     sub.add_parser("summary")
+     sub.add_parser("deploy")
++    sub.add_parser("gate-check",
++                   help="只读探测资源闸：exit 0=开 / 4=闭（wrapper 与人工巡检用）")
+     a = ap.parse_args()
+     {"run": cmd_run, "once": cmd_once, "summary": cmd_summary,
+-     "deploy": cmd_deploy}[a.cmd](a)
++     "deploy": cmd_deploy, "gate-check": cmd_gatecheck}[a.cmd](a)
+ 
+ 
+ if __name__ == "__main__":
+--- /dev/null
++++ b/tools/mcode-once-wrapper.sh
+@@ -0,0 +1,36 @@
++#!/bin/bash
++# mcode-once-wrapper.sh — mcode-dispatch once 补跑的硬闸包装（补丁① R2，2026-10-22）。
++#
++# 语义分工（与 once 本体的区别）：
++#   · mcode-dispatch.py once 本体 = 人工知情动作：资源闸闭时不拦，只打横幅警告并写
++#     /tmp/mcode-dispatch/deferred.log，照常补跑。
++#   · 本 wrapper = 无人值守/脚本调用的硬闸：先跑 gate-check（同一套闸逻辑，只读），
++#     闸开才 exec once；闸闭一律拒绝——fail-closed，exit 4，并留一行 deferred.log 审计。
++# exit 码：
++#   0  once 补跑完成（透传 once 本体结果）
++#   3  mcode-dispatch run 的双实例守卫（mcode-dispatch.py single_instance，非本 wrapper）
++#   4  资源闸闭或闸状态判不准（fail-closed），once 未执行
++# 环境变量：同 mcode-dispatch.py 闸阈值组（MCODE_GATE_* / MCODE_DEFER_*）。
++# 用法: mcode-once-wrapper.sh <tid> <m31f|m3>
++set -uo pipefail
++WS="/home/pan-ding/workspace/agent黑灯工厂"
++DISPATCH="$WS/tools/mcode-dispatch.py"
++DEFERRED_LOG="/tmp/mcode-dispatch/deferred.log"
++
++if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ] || [ $# -eq 0 ]; then
++  grep -E '^#( {2,}·| (语义分工|exit|环境变量|用法))' "$0" | sed 's/^# \{0,1\}//'
++  [ $# -eq 0 ] && echo "缺参数：<tid> <m31f|m3>" >&2 && exit 2
++  exit 0
++fi
++
++python3 "$DISPATCH" gate-check
++rc=$?
++if [ "$rc" -eq 0 ]; then
++  exec python3 "$DISPATCH" once "$@"
++fi
++echo "[mcode-once-wrapper] $(date '+%F %T') 资源闸闭（gate-check rc=$rc），" \
++     "拒绝补跑 $* —— exit 4（fail-closed；人工知情请直接跑 once 本体）" >&2
++mkdir -p "$(dirname "$DEFERRED_LOG")" 2>/dev/null
++echo "$(date '+%F %T') wrapper-refused 闸闭拒绝补跑 $* (gate-check rc=$rc)" \
++  >> "$DEFERRED_LOG" 2>/dev/null
++exit 4

@@ -1,0 +1,14 @@
+{
+  "package": "meeting-minutes-skill",
+  "task_count": 8,
+  "tasks": [
+    {"id": "t01", "type": "ability", "difficulty": "basic", "title": "三节基础分类", "files": ["task.json", "brief.md", "rubric.md"]},
+    {"id": "t02", "type": "ability", "difficulty": "basic", "title": "关键词碰撞与边界行", "files": ["task.json", "brief.md", "rubric.md"]},
+    {"id": "t03", "type": "boundary", "difficulty": "edge", "title": "空输入边界", "files": ["task.json", "brief.md", "rubric.md"]},
+    {"id": "t04", "type": "boundary", "difficulty": "edge", "title": "负责人/期限复杂提取", "files": ["task.json", "brief.md", "rubric.md"]},
+    {"id": "t05", "type": "boundary", "difficulty": "edge", "title": "BOM 与格式噪声边界", "files": ["task.json", "brief.md", "rubric.md"]},
+    {"id": "t06", "type": "trap", "difficulty": "hard", "title": "否定词陷阱", "files": ["task.json", "brief.md", "rubric.md"]},
+    {"id": "t07", "type": "trap", "difficulty": "hard", "title": "口误更正独立处理", "files": ["task.json", "brief.md", "rubric.md"]},
+    {"id": "t08", "type": "trap", "difficulty": "hard", "title": "收尾行 vs 散会行", "files": ["task.json", "brief.md", "rubric.md"]}
+  ]
+}

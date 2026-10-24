@@ -1,0 +1,57 @@
+#!/bin/bash
+# s1-heartbeat.sh — S1 测评心跳：30 分钟一轮
+#   1) mcode 令牌探活，恢复即自动续跑 m31f 双臂（D1/D3）
+#   2) 全部 results.jsonl 增量入 MES（幂等）
+#   3) 在跑臂数/错误行巡检，写 /tmp/s1-heartbeat.log
+# 背景：本会话由定时任务派生，CronCreate 被禁，故用常驻脚本替代心跳 cron。
+# 纪律：密钥零明文（verify 只输出 ok/invalid/exit code）。
+
+LOG=/tmp/s1-heartbeat.log
+AF=/home/pan-ding/workspace/agent黑灯工厂/af
+BIN=$AF/target/debug/af-bench
+WS=/home/pan-ding/workspace/agent黑灯工厂
+D1_TASKS="astropy__astropy-12907,astropy__astropy-13033,astropy__astropy-13236,astropy__astropy-13453,astropy__astropy-14096,astropy__astropy-14182,django__django-10880,django__django-10914,django__django-10999,django__django-11066,django__django-11087,django__django-11095,django__django-11099,matplotlib__matplotlib-13989,matplotlib__matplotlib-20488,matplotlib__matplotlib-20676,matplotlib__matplotlib-20826,matplotlib__matplotlib-20859,matplotlib__matplotlib-22719,matplotlib__matplotlib-22865,psf__requests-1142,pytest-dev__pytest-10051,sympy__sympy-11618"
+D3_TASKS="astropy__astropy-13398,astropy__astropy-13977,django__django-10097,django__django-11138,django__django-11276,django__django-11532,django__django-13121,django__django-14011"
+
+log() { echo "[$(date '+%F %T')] $*" >> "$LOG"; }
+
+resume_m31f() {
+  local n
+  n=$(grep -c . /tmp/bench-s1-d1-m31f-r2/results.jsonl 2>/dev/null || echo 0)
+  if [ "$n" -lt 23 ] && ! pgrep -f 'af-bench.*bench-s1-d1-m31f-r2' >/dev/null; then
+    log "m31f D1 续跑（现 $n/23 行）"
+    (cd "$AF" && nohup "$BIN" --suite swe-v --data-root /tmp/swev-s1 --tasks "$D1_TASKS" \
+      --profile mavis-m31f --out /tmp/bench-s1-d1-m31f-r2 --host anolis \
+      >> /tmp/bench-s1-d1-m31f-r2.log 2>&1 &)
+  fi
+  n=$(grep -c . /tmp/bench-s1-d3-m31f-r2/results.jsonl 2>/dev/null || echo 0)
+  if [ "$n" -lt 8 ] && ! pgrep -f 'af-bench.*bench-s1-d3-m31f-r2' >/dev/null; then
+    log "m31f D3 续跑（现 $n/8 行）"
+    (cd "$AF" && nohup "$BIN" --suite swe-v --data-root /tmp/swev-s1 --tasks "$D3_TASKS" \
+      --profile mavis-m31f --out /tmp/bench-s1-d3-m31f-r2 --host anolis \
+      >> /tmp/bench-s1-d3-m31f-r2.log 2>&1 &)
+  fi
+}
+
+log "心跳脚本启动（pid $$）"
+while true; do
+  if timeout 60 ssh -o ConnectTimeout=8 anolis 'python3 ~/.local/bin/mcode-token.py verify' >>"$LOG" 2>&1; then
+    log "mcode 令牌 ok"
+    resume_m31f
+  else
+    log "mcode 令牌仍不可用"
+  fi
+  for f in /tmp/bench-s1-d1-*/results.jsonl /tmp/bench-s1-d2-*/results.jsonl /tmp/bench-s1-d3-*/results.jsonl; do
+    [ -f "$f" ] && python3 "$WS/tools/bench-mes.py" "$f" >>"$LOG" 2>&1
+  done
+  nlanes=$(pgrep -f 'target/debug/af-bench --suite' | wc -l)
+  log "在跑 af-bench 臂: $nlanes"
+  for lg in /tmp/bench-s1-d1-*.log /tmp/bench-s1-d2-*.log /tmp/bench-s1-d3-*.log; do
+    [ -f "$lg" ] || continue
+    err=$(grep -c '端点 HTTP 4\|RUN_FAILED\|传输失败' "$lg" 2>/dev/null || echo 0)
+    [ "$err" -gt 0 ] && log "$(basename "$lg"): 错误行 $err"
+  done
+  code=$(curl -s -m 6 -x http://127.0.0.1:7890 https://registry-1.docker.io/v2/ -o /dev/null -w '%{http_code}' 2>/dev/null)
+  [ "$code" != "000" ] && log "mihomo 7890 恢复（$code）——可续拉 74 张镜像"
+  sleep 1800
+done

@@ -1,0 +1,2188 @@
+# Agent 黑灯工厂 Harness 改进策略总表
+
+> **一句话定位**（2026-10）：面向全自主、大规模并行运行 coding agent 产线（「黑灯工厂」）的 harness 改进策略决策总表——共收录 **180 条**经逐条独立核验的策略（**A 级 117 / B 级 56 / C 级 7**，另剔除 133 条），每条附来源链接、证据、核验结论、三项打分与可直接执行的 A/B 测试设计，覆盖单体 agent 改进与多 agent 协同两大类。
+
+## 一、执行摘要
+
+1. **总量与结构**：主清单收录 180 条（另设剔除清单 133 条），12 路逐条独立核验后定级 **A 级 117 条、B 级 56 条、C 级 7 条**；链接核验有效 176/180（4 条因 openai.com 域名反爬未能核实）；条目转述与原文比对：**完全一致 170 条、部分一致 4 条（S001/S005/S038/S041）、部分一致但未核实 1 条（S168）、不一致 3 条（S024/S101/S141）、未能核验 2 条（S149/S169）**。第四节以负面结果、边界条件或争议证据为主列出 **33 条**（按定级 A19/B13/C1）。
+2. **最大的单项杠杆在接口层而非模型层**：固定模型下 7 个 harness 的 Pass@1 最大差 24.3pp；把补丁产出从「模型写 diff」改为「模型改文件、runner 从 git 状态导出 patch」后，同一模型 resolved 率从 19.3% 升到 71.2%、apply 失败率 <1.5%（S128）。
+3. **上下文治理第一原则是先测零 LLM 成本手段**：系统比较显示没有任何 LLM 压缩器显著提升任务质量、反而使 token 成本上升 24–94%，只有观测掩码实现净节省（S009）；工具结果清理单独 +29%、组合 +39%、token 降 84%（S002）；大工具输出外置到文件（S083）是同类确定性手段。
+4. **并行化有两条反直觉红线**：动态并发只在长时程任务上有效，在 SWE-bench 类有界任务上 Claude Code 最多 **−24.0pp**（2,124 次受控执行，S132）；无验证器时并行/顺序两条测试时扩展轴都难以持续涨分（verification gap，S096）。多 agent 无一种方法全领域占优、模型越强协同增益越小（S140/S143）。
+5. **验证与选择器是并行扩展的前提，也是收益来源**：多路 rollout + 选择器的可复现收益约 **+5.8～+8.8pp**：critic 选优 60.6%→66.4%（S046，+5.8pp）、并行测试时计算 +6.9pp（S092）、混合验证器 42–43%→51%（S072，+8～9pp）、测试投票 ensemble 57.4%→66.2%（S094，+8.8pp）；S098 的 pass@k 覆盖收益（pass@1 17.9%→pass@6 32.7%）是 oracle 上限，其条目明确「没有证据表明 chooser 能逼近该上限」；S099 的 +18.8pp 为 2022 年 HumanEval 时代数字，仅作范式参照；LLM 自动消解合并冲突最强模型正确率 <60%（S146），合并必须门禁化并配冲突预测排程（S171/S172）。
+6. **技能与规则资产需要「准入—极性—过期」三重治理**：49 个公开技能 39 个零提升（S160）；同一技能跨配置表现有正有负的任务占 36.78%（S124——条目口径是「跨配置不一致」，不能读成「1/3 任务受害」）；规则收益与内容弱相关、更像 context priming（S161：随机规则与专家规则同效 +13.8pp）——「优先收负向约束」是当前唯一有正向信号的筛选启发式而**非定论**，应作为假设进 A/B；技能会随版本跃迁静默失效（S162）；大技能库会发生路由崩塌需 harness 显式预选（S051）。
+7. **纯语言自评式反思不构成可靠改进**：无外部信号的自我纠错负收益（S071）；工具化批评才有稳定增益（S085）；盲重采样即可打平自修复且省 2.5–5.5 倍 token（S086）；LLM 会「自证有 bug」造成伪修复死循环（S089）——修复必须由可复现执行证据触发，反思定时不能交给 LLM judge（S087）。
+8. **评测纪律决定 A/B 结论可信度**：榜单小差距不可排序（前两名可区分实例仅 164 个，S151）；harness 版本漂移可在分数不动时让 token +70%（S130）；静态基准饱和与污染实测使同设置成绩腰斩（S147/S076/S122）；必须按仓库聚类做配对检验与功效分析（S150）。
+9. **经济性必须一等公民**：同等性能推理成本每季约降 47%（S152）；「昂贵失败」平均耗 8.8M token/658s，成功仅 1.8M token/167s（token 约 4.9 倍、墙钟约 3.9 倍，条目口径为「4 倍以上」；S170）；token 少 ≠ 更快更便宜（S017）。建议主指标 $/resolved，辅以 tokens/resolved、失败/成功成本比。
+10. **建议的 A/B 顺序**（与 5.1 一致）：第 1 批做接口与上下文底座（S128/S002/S009/S061–S063/S033）、并行选优管线（S091/S092/S046/S072/S094/S099）与评测纪律（S150/S152），第 2 批做多 agent 治理与强弱模型路由（S132/S157/S171–S172/S134/S135），依赖训练或重基建的放第 3 批（S013/S008/S131/S167）。详见第五节。
+
+## 二、A 级策略总表
+
+共 117 条，按「证据强度 + 大型仓库价值 + 可测性」总分降序、同分按编号排列。**测试设计列收录全文、可直接执行**；承诺改进与证据为句界节选（含勘误与口径标注；完整版见第三节与 strategies.csv）。
+
+| # | 策略 | 来源与链接 | 承诺的改进 | 证据 | 建议的 A/B 测试设计 |
+|---|------|-----------|-----------|------|--------------------|
+| 1 | **LLM 摘要式对话压缩（auto-compact / LLMSummarizingCondenser，含默认参数基线）**（S001，14分，⚠勘误） | [OpenHands（All Hands AI）官方博客 + Claude Code 官方文档；…](https://www.openhands.dev/blog/openhands-context-condensensation-for-more-efficient-ai-agents) | 接近上限时用 LLM 把历史摘要为『目标/进度/剩余工作/文件与失败测试』再重启：SWE-bench Verified 子集解决率 54% vs 无压缩基线 53%，单轮 API 成本最高降 2 倍（压缩后稳定在基线一半以下），token 与完成时间均下降 ｜ 〔并集·Condenser参数基线〕LLMSummarizingCondenser 默认 max_size=120（事件数触发压缩）、keep_first=4（开头 4 个事件逐字保留，通常为系统提示与任务定义），压缩后视图以 max_size//2≈60 个事件收尾；有阈值触发（每步检查）+ 手动触发（上下文溢出错误后发 CondensationRequest）双路径；… | OpenHands 官方对照实验（SWE-bench Verified 子集）：开 condensation 解决率 54% vs 基线 53%，成本降一半以下，基线成本随对话长度二次增长、压缩后近似线性；… | 同一批 SWE-bench 任务对：对照组到上下文溢出即截断/失败，实验组达到 max_size 触发 LLM 摘要压缩，多 seed 比较解决率、token、美元成本 |
+| 2 | **Lost in the middle：关键信息置首尾的位置工程**（S006，14分） | [Liu et al.《Lost in the Middle: How Language Models Use Long Contexts》（TACL 2024）](https://arxiv.org/abs/2307.03172) | 多文档 QA 与 key-value 检索上，相关信息位于开头或结尾时性能最高、位于中间显著下降（U 形曲线）；开头还存在偏向引用首文档的启动效应 | 受控实验：相同相关信息仅改变位置（多文档 QA + key-value 检索），覆盖开源/闭源多家模型（含 GPT-3.5/4、Claude 系与 TULU 等微调模型）；被引 7,200+（检索结果显示）；… | 同一提示内容两种排布：关键约束置首尾 vs 均匀散布，比较解决率与违规次数；另测固定编排『最新观测永远置于上下文末尾』 |
+| 3 | **Critic 模型 + best-of-N 推理时扩展：多 rollout 采样、训练专用打分器挑最优补丁**（S046，14分） | [OpenHands 官方博客《SOTA on SWE-Bench Verified with Inference-Time Scaling and Critic Model》(20…](https://www.openhands.dev/blog/sota-on-swe-bench-verified-with-inference-time-scaling-and-critic-model) | 不改动 agent 与 scaffold，靠采样 5 条轨迹并用微调 critic 挑选：SWE-bench Verified 从单轨迹 60.6% 提到 66.4%（'log-linear performance improvement'，当时自称 SOTA，优于用 Claude 提示词重排的方案）；并称在 LiveSWEBench、Multi-SWE-Bench（8 语言）登顶。Critic 为 Qwen2.5-Coder-32B 微调，TD 学习（γ=0.99，全部测试通过终端奖励 1 否则 0）+ 回归头，权重公开（HF: all-hands/openhands-critic-32b-exp-20250417） | 官方博客（2026-10 抓取）原文数字：baseline 60.6%、5 attempts 66.4%、训练细节（veRL 框架、TD 目标 r_t=γ·r_(t+1)、vLLM token-classificatio… | 同一大仓库任务集：对照组单 rollout；实验组 N∈{3,5} rollout + 分别用（a）规则 critic、（b）开源 openhands-critic-32b、（c）LLM 提示词重排选择；比较解决率增益与每任务总成本曲线 |
+| 4 | **窗口化文件查看器（约 100 行窗口）+ 编辑后自动回显**（S061，14分） | [SWE-agent 论文（Yang et al., 2024）Table 3 / §3 与 §5.1](https://arxiv.org/abs/2405.15793) | 给 agent 专用文件查看器（默认窗口 100 行，可 scroll_up/scroll_down/goto），编辑命令执行后查看器自动显示更新后的内容；消融显示窗口 100 行 18.0% ≫ 30 行 14.3% ≫ 全文件 12.7%（SWE-bench Lite 300 例，GPT-4 Turbo） ｜ 〔并集·SWE-agent 100行窗口(C分片,含网格)〕不用 cat 整文件，每轮只展示最多 100 行的窗口；窗口大小是 ACI 中影响最大的单一旋钮，100 行显著优于 30 行、200 行和整文件。 | 论文 Table 3「File Viewer」消融：30 lines = 14.3（↓3.7）、100 lines = 18.0（基准配置）、Full file = 12.7（↓5.3）；… | 对照组 = 现有整文件/cat 读取；实验组 = 100 行窗口 + 编辑后自动回显；同一模型、同一批大仓库 issue 任务、同一 token 预算，比较 resolved rate 与平均上下文占用（token/任务）。 |
+| 5 | **编辑命令内嵌 lint 门禁：致命语法错拒绝落盘并回显前后对照**（S062，14分） | [SWE-agent 论文 Table 3 + SWE-agent 官方实现 tools/windowed/lib/flake8_utils.py](https://arxiv.org/abs/2405.15793) | 在 edit 里集成 linter，只允许「不产生 major error」的修改落盘，非法编辑被丢弃并要求 agent 重试：w/ linting 18.0 vs 单纯 edit action 15.0（↓3.0）vs 完全无 edit 接口 10.3（↓7.7），SWE-bench Lite 300 例，GPT-4 Turbo ｜ 〔并集·SWE-agent 编辑护栏(C分片,51.7%/57.2%)〕在编辑命令里内置 linter：语法错误则丢弃该次编辑不写入文件，并把原始代码与编辑后代码对照展示给 agent 让它重试；比不做 lint 的编辑接口高 3.0pp。 | 论文 Table 3「Editor」消融：edit action = 15.0（↓3.0）、w/ linting = 18.0、No edit = 10.3（↓7.7）。… | 对照组 = 编辑直接落盘不做 lint；实验组 = lint 门禁（同一 lint 规则集）；记录落盘被拒率、被拒后重试成功率、以及最终 resolved rate，验证「拦截→修复」闭环是否真的净赚。 |
+| 6 | **摘要式受限搜索：只回命中文件清单 + 阈值守卫要求收窄查询**（S063，14分） | [SWE-agent 论文 Table 3 / Figure 5 + 官方 docs/background/aci.md](https://raw.githubusercontent.com/SWE-agent/SWE-agent/main/docs/background/aci.md) | 官方 ACI 文档第 3 条明确：定制全目录搜索命令要「succinctly list the matches——只列出至少含一个匹配的文件」，给模型看每个匹配的上下文会让模型困惑；Table 3 消融：Summarized search 18.0 vs Iterative search 12.0（↓6.0）vs 完全不给 search 工具 15.7（↓2.3） ｜ 〔并集·SWE-agent 摘要式搜索(C分片,含阈值代码)〕一次性列全所有命中文件加命中次数的摘要式搜索接口，优于仿 IDE 的逐条迭代搜索（next/prev），也优于不给搜索工具；迭代式搜索会让 agent 逐条看完所有结果，耗尽预算甚至比没有搜索更差。 | 论文 Table 3「Search」行：Summarized = 18.0、Iterative = 12.0（↓6.0）、No search = 15.7（↓2.3）；… | 三臂 A/B/C：无搜索工具 / 摘要式搜索（只列文件+行号）/ 迭代式搜索（带上下文片段）；同模型同任务集，比较 resolved rate、定位命中率（先用检索结果判断应改哪个文件的准确率）与 token/任务。 |
+| 7 | **重复采样扩展覆盖（repeated sampling / pass@k 覆盖曲线）**（S091，14分，⚠勘误） | [Large Language Monkeys: Scaling Inference Compute with Repeated Sampling（Stanford，Brown et…](https://arxiv.org/abs/2407.21787) | 解出覆盖率随采样数在 4 个数量级内持续上升，常呈 log-linear（存在推理时间 scaling law）；SWE-bench Lite 上 DeepSeek-Coder-V2-Instruct 从单样本 15.9% 升至 250 样本 56%，超过当时单样本 SOTA 43%。 | arXiv 摘要原文：'the fraction of issues solved with DeepSeek-Coder-V2-Instruct increases from 15.9% with one sample… | 同一批真实仓库任务，对照组 N=1，实验组 N∈{2,5,10,25}（不同温度/提示），画 resolve@N 覆盖曲线并拟合幂律，观察斜率与平台点。 |
+| 8 | **把补丁产出责任从「模型直接写 unified diff」改为「模型改文件、runner 从 git 状态导出 patch」**（S128，14分） | [Claw-SWE-Bench: A Benchmark for Evaluating OpenClaw-style Agent Harnesses on Coding Tasks …](https://arxiv.org/abs/2606.12344) | 固定模型下 7 个 harness 的 Pass@1 最大差 24.3pp（Qwen 3.6-flash）；改为「模型改仓库文件、runner 从 git 状态导出 patch」后，同一模型（GLM 5.1）resolved 率从 19.3% 升到 71.2%，apply 失败率降到 1.5% 以下。 | 350 个真实 GitHub issue（8 种语言、43 个仓库），每格 3 次重复共 22,050 次任务执行。… | 在自研 harness 上做 A/B：实验组走「工具改文件→git diff 导出 patch」，对照组走「模型直出 unified diff 文本」，在大仓库任务上统计 resolved、apply-fail 率与 token。 |
+| 9 | **按角色分配不同模型（per-role model routing）**（S159，14分） | [Magentic-One 论文 Table 1 与 §5.1；AutoGen GAIA 官方 scenario；Squad](https://arxiv.org/abs/2411.04468) | 不同槽位用不同模型：Magentic-One 把 o1-preview 只放在 Orchestrator 的外循环与 Coder 两个角色，其余 agent 保持 GPT-4o。GAIA test set 完成率由纯 GPT-4o 的 32.33%±5.3 提升到 38.00%±5.5（+5.67 个百分点）。官方 GAIA 评测场景同样为 4 个角色各配一个独立 model client。 | 论文 Table 1：Magentic-One (GPT-4o) GAIA 32.33±5.3 / AssistantBench EM 11.0±4.6、accuracy 25.3±6.3 / WebArena 32.8… | 三组：①单一模型跑全部角色；②仅计划器 + 编码器用强模型，其余弱模型；③按角色三档（规划/编码=强，检索/执行=中，机械=弱）。同任务集同 seed，比较「一次通过率 × 平均单任务成本」这个乘积以及 P50 步数。 |
+| 10 | **SWE-Skills-Bench：先证明技能本身有没有边际收益（成对开/关 skill 的受控评测）**（S160，14分） | [SWE-Skills-Bench 论文（arXiv 2603.15401，2026-03-16）](https://arxiv.org/abs/2603.15401) | 技能注入对真实 SWE 任务的收益远低于普及速度：49 个公开技能里 39 个 pass rate 零提升，平均仅 +1.2%；token 开销从节省到 +451% 不等；只有 7 个专用技能有实质收益（最高 +30%），3 个因版本不匹配的指导与项目上下文冲突而劣化（最多 -10%） | 本次通过 arXiv API（export.arxiv.org/api/query, id_list=2603.15401）读取原文摘要核实：49 个公开 SWE 技能 × 钉在固定 commit 的真实 GitHub … | 同一批真实仓库任务做配对 A/B：对照组不注入技能（或注入随机填充技能），实验组注入目标技能，其余 harness 变量（模型、预算、工具集）完全一致，比较 pass rate、token 消耗与回归率三项同时看。 |
+| 11 | **自托管前缀缓存推理栈：RadixAttention + 缓存亲和调度（含生产级 KV 分离 Mooncake）**（S167，14分） | [SGLang/RadixAttention（NeurIPS 2024）；Mooncake（USENIX FAST 2025）；另参 Prompt Cache（MLSys 2024）](https://arxiv.org/abs/2312.07104) | SGLang 摘要声称 RadixAttention 以 radix tree 跨调用自动复用 KV cache，在多轮对话、few-shot、agent 控制流、JSON 解码、RAG 等负载上取得最高 6.4 倍吞吐（对比 SOTA 推理系统）；Mooncake（Kimi 生产系统的 KVCache 分离架构）摘要声称模拟场景吞吐 +525%、承接请求量 +75%；MIT Prompt Cache（prompt module 语义级复用）声称 TTFT 降低 8 倍（GPU）到 60 倍（CPU）。 | 同行评审系统论文的公开基准成绩（本次已逐一核对 arXiv abs 页原文）：SGLang（arXiv 2312.07104，被引 1500+）；… | 同一批大仓库任务，A 组请求随机路由到任意推理实例、B 组按 (agent, 任务) 前缀粘性路由；自托管 vLLM/SGLang 开/关 prefix caching，对比实测 cache hit rate、$/任务、TTFT 与端到端通过率。 |
+| 12 | **把成本效率设为一等评测指标（SWE-Effi 效率重排 + Agentless/mini-swe-agent 成本基线）**（S170，14分） | [SWE-Effi（arXiv 2509.09853，SWE-agent 团队）；Agentless（arXiv 2407.01489）；…](https://arxiv.org/abs/2509.09853) | SWE-Effi 用「效果=解决率/消耗（tokens、时间、调用数）」多维指标在 SWE-bench Verified 50 题分层子集上重排 5 scaffold×3 模型，发现 token 雪球效应与「昂贵失败」：未解决尝试平均耗 8.8M tokens/658s，成功仅 1.8M/167.2s（>4 倍）；scaffold 与基模的配合度比 scaffold 本身更决定效率。Agentless 论文自报约 $0.34/实例；mini-swe-agent README 称 100 行 Python 实现 >74% SWE-bench Verified。 | 公开基准上的系统对照实验（本次已核对 HTML 全文数据）：SWE-Agent+GPT-4o-mini 仅 10% 解决率且 181 次调用/8.1M 输入 tokens（token 成本 18 倍于最优组合）；… | harness 每次运行统一产出 $/resolved、tokens/call、失败均值÷成功均值三个成本指标；任何策略 A/B 时成本曲线与通过率同报；并以 mini-swe-agent 作为最小成本基线组。 |
+| 13 | **工具结果清理 / 上下文编辑（tool result clearing / context editing）**（S002，13分） | [Anthropic《Managing context on the Claude Developer Platform》官方文章与 context management 公告（随 …](https://claude.com/resources/articles/context-management) | 接近上限时自动清除过期工具调用与结果：context editing 单独带来 29% 提升（内部 agentic search 评测）；memory tool + context editing 组合 +39%；100 轮网页搜索评测中让原本因上下文耗尽而失败的流程跑完，token 消耗降 84% | Anthropic 官方对照评测（Claude Sonnet 4.5，内部多轮 agentic search 集合，基线未细分公开）：context editing 单独 +29%，组合 +39%，100 轮 web s… | 对照组保留全部工具输出直到溢出；实验组超阈值后清除最旧工具输出（保留调用骨架+最近 N 轮结果），比较解决率与 token/成本 |
+| 14 | **观测屏蔽/工具输出掩码等『无损』压缩 + 负结果基线：LLM 摘要压缩不保证正收益**（S009，13分） | [OpenHands condenser 家族（ObservationMaskingCondenser / BrowserOutputCondenser / bash 截断）+ 《E…](https://arxiv.org/abs/2605.18854) | 系统比较 8 种记忆压缩策略（滑动窗口到 LLM 摘要）：没有任何压缩器显著提升任务输出质量，LLM 压缩器反而使 token 成本上升 24–94%；仅掩码工具调用输出实现 8.6% 净 token 节省；最优策略随领域与任务长度变化。OpenHands 提供现成实现：ObservationMaskingCondenser（attention_window=100 之外的旧观测替换为占位符）、BrowserOutputCondenser（只留最近 1 条浏览器观测）、bash 输出超长截断并加『[Previous command outputs are truncated...]』前缀 | GPT-4o 上 60 个 DiscoveryBench 任务 × 8 种策略 = 480 次评测（6 个科学领域），对照无压缩基线；论文指出此前缺少系统比较，结论为简单便宜策略优先。… | 把『无压缩』『工具输出掩码（attention_window 扫 20/50/100）』『LLM 摘要』三组放进同一 A/B 框架，仅当掩码组显著劣化或摘要组显著占优时才启用摘要压缩 |
+| 15 | **Agentless：无自主规划三阶段流水线 + 批量采样与测试选优（低成本强基线）**（S011，13分） | [Agentless: Demystifying LLM-based Software Engineering Agents（Xia et al.，arXiv:2407.01489；…](https://arxiv.org/abs/2407.01489) | 用 LLM 做三阶段（定位 → 修复 → 补丁验证），不让 LLM 自主决定后续动作、不使用复杂工具，仍能拿到当时开源软件 agent 的最好成绩 ｜ 〔并集·Agentless(B分片)〕不用自由 agent 循环，用固定三阶段（层次化定位→修复采样→跑代码验证 patch）在 SWE-bench Lite 解决 32.00%（96 例），成本仅 $0.70/issue（早期版本报告 27.33%、$0.34/issue，为当时开源最高）；关键在验证阶段由执行结果而非 LLM 自评决定取舍 ｜… | SWE-bench Lite（300 题）：32.00%（96 题正确），成本 $0.70/题，论文称高于当时所有开源软件 agent；… | 对照组 = 现 harness 的自主工具循环 agent（可自由 grep/glob/read）；实验组 = 固定三阶段脚本化流程（同一生成模型、同一任务集）；比解决率、交互轮次、总 token |
+| 16 | **把「仓库探索」拆成独立可测量、可预算的前置阶段，用低成本模型跑定位、高成本模型只负责改码**（S015，13分） | [Cost-Effective Repository Exploration for Agentic Issue Localization (arXiv:2608.29675)](https://arxiv.org/abs/2608.29675) | 仓库探索是 coding agent 流水线中独立且昂贵的阶段（生成补丁前必须先找出可能相关的文件）；把它委派给更低成本的 explorer 模型仍能保留有用的定位质量，因此探索应被当作可独立度量、可预算的模块，explorer 的选择由下游交接契约决定 | IssueLoc-Bench：499 个 SWE-bench Verified 派生任务 + 500 个来自另外 153 个仓库的任务，5 个 explorer 模型在同一只读交互接口下评测，指标含早期候选发现、top-… | 实验组 = 小模型 explorer（只读）+ 大模型 fixer；对照组 = 同一大模型既探索又改码；固定任务集，比最终解决率、总 token/成本与 wall-clock，并分别统计 Hit@3 与严格文件集 F1 |
+| 17 | **工具输出按意图闸门过滤成「紧凑证据包」，原文外置可按需回取（可逆压缩）**（S016，13分） | [ContextSniper (AntTrail, arXiv:2607.01916)；可逆压缩机制见 DTOC (arXiv:2609.26121)](https://arxiv.org/abs/2607.01916) | agent 常把大量上下文预算花在整文件读取、宽泛搜索和长终端输出上，有用证据与噪声混杂；ContextSniper 在代码与动作记忆三层抽象上建索引、混合排序召回、用意图感知的上下文闸门过滤长工具输出，返回紧凑证据包同时保留按需恢复完整源码；DTOC 则把完整工具输出留在外部记忆，上下文里只放可按需重建的占位符 | ContextSniper：每条件 50 题的匹配对照，OpenClaw + SWE-bench Lite 总 token -51.5%、记录成本 -36.4%；… | 对照组 = 现 harness 的整段工具输出直塞（必要时加普通截断）；实验组 = 意图感知过滤 + 外部原文可回取；同任务集比解决率、输入 token、步数，并额外做「截断 vs 可逆压缩」两档以复现可逆性消融 |
+| 18 | **压缩策略必须按「成功率/延迟/成本」三指标评估，token 少 ≠ 更快更便宜（重要负面结果）**（S017，13分） | [Beyond Token Savings: A Systematic Study of Context Compression in LLM Agents (arXiv:2609.…](https://arxiv.org/abs/2609.32961) | 现有 agent harness 把「压什么、何时压、压多少」捆成固定策略；系统拆解这些决策后发现：更少的 token 未必意味着更快或更便宜，压缩必须按任务、模型与负载定制并用执行侧指标评估 | 3 个开源权重模型 × SWE-bench Verified 与 Terminal-Bench 1.0，近 35,000 次 agent run，测任务成功率、token 用量、端到端延迟与估算成本。… | 把压缩策略做成可配置因子（开关/比例/时机）做网格 A/B，同时记录 solve rate、wall-clock、token 与 $/task；把「token 下降但延迟上升」设为否决条件 |
+| 19 | **Reflexion：语言化反思存入情景记忆（经典）**（S022，13分） | [Reflexion 论文（arXiv 2303.11366，NEC 等）；…](https://arxiv.org/abs/2303.11366) | HumanEval pass@1 达 91%，超过当时最强的 GPT-4 直接生成（80%）；机制：不更新权重，把对失败的口头反思存入情景记忆缓冲区供后续尝试使用 ｜ 〔并集·Reflexion(B分片)〕把执行失败的测试信号转成语言反思存入情景记忆再重试，HumanEval pass@1 达 91%，超过当时 GPT-4 的 80% ｜ 〔并集·Reflexion(C分片,含消融)〕不改权重，用自然语言『自反思』把环境反馈写进情景记忆以诱导下一轮更好决策；HumanEval pass@1 达 91.0，超过当时 SOTA GPT-4 的 80.1。 | arXiv 摘要（本次已核实）：HumanEval 91% vs 80%；支持标量/自由文本、外部/内部模拟等多种反馈源；在顺序决策、编码、推理任务上均优于基线 ｜… | A/B：失败后裸重试 vs 重试前注入结构化反思，测同任务重试成功率与收敛轮数 |
+| 20 | **ReasoningBank + MaTTS：成败皆取的推理记忆与记忆感知测试时扩算**（S023，13分） | [ReasoningBank 论文（arXiv 2509.25140，Google，ICLR 2026）](https://arxiv.org/abs/2509.25140) | WebArena SR：Gemini-2.5-flash 40.5→48.8、pro 46.7→53.9（相对最高 +20%）；SWE-Bench-Verified：flash 34.2→38.8、pro 54.0→57.4；交互步数最多 -16%；MaTTS 并行扩算再加成（49.7→55.1）；消融：成败都存比仅存成功 +3.2（49.7 vs 46.5），而 AWM 加失败数据反降（44.4→42.2） | arXiv HTML 全文（本次已核实）：记忆条目=标题+描述+从成功与失败中提炼的推理策略；检索注入 + 新经验写回；MaTTS 用并行/顺序扩算产生更丰富的对比信号合成更高质量记忆；… | A/B：无记忆 vs ReasoningBank 式条目库；再加消融组：仅存成功 vs 成败都存，验证失败信号在本产线的净价值 |
+| 21 | **SWE-ContextBench：编码经验复用的受控评测（正面与负面证据）**（S024，13分，⚠勘误） | [SWE-ContextBench 论文（arXiv 2602.08316）](https://arxiv.org/abs/2602.08316) | Oracle 摘要上下文使 resolved 26.26%→34.34%（+8.1 点）；自主（free）检索完整轨迹零提升且成本 +27.3%；选错摘要反而 -4 点（22.22%）；摘要均长 217 tokens vs 全轨迹 25,634 tokens；记忆框架实测：Supermemory 30.30% > OpenViking 29.20% > Mem0 24.24% | arXiv HTML 全文（本次已核实）：基于 SWE-Bench Lite/Multilingual/Verified 共 1,476 任务、51 仓库、9 语言；… | 直接照搬其设计：经验池不过滤，比较 oracle/自主检索 × 全轨迹/摘要 四象限，再用自家检索器对照 Supermemory/OpenViking 基线 |
+| 22 | **把治理/安全约束「钉」在上下文之外（Constraint Pinning），避免被压缩静默抹除**（S033，13分） | [Governance Decay: How Context Compaction Silently Erases Safety Constraints in Long-Horizo…](https://arxiv.org/abs/2606.22528) | 上下文压缩会静默删除 agent 本来稳定遵守的约束：在 1,323 个 episode 上，违规率从'约束完整可见时 0%'升到压缩后 30%（部分模型达 59%）；把约束隔离在有损压缩之外可把违规率恢复到 0% | 摘要：'Across 1,323 episodes, violation rises from 0% with the policy in full context to 30% after compaction, re… | 对照组=约束只写在会话上下文里（会经历压缩）；实验组=约束外置为不可压缩的 pinned 区（每轮重新注入/由 harness 强制）；用带确定性打分的违规探针任务集比较违规率与被抹除率 |
+| 23 | **AgentDelegate 子任务委派：父 agent 阻塞式交派专用 agent**（S044，13分） | [OpenHands 平台论文（ICLR 2025，arXiv 2407.16741）+ 经典 harness 代码 agent_controller.py；…](https://arxiv.org/abs/2407.16741) | CodeActAgent 可用 AgentDelegateAction 把网页浏览等子任务交给专职 BrowsingAgent；论文实测委派几乎无损：WebArena 上 CodeActAgent v1.8 经委派 15.3%（claude-3.5-sonnet）对比专职 BrowsingAgent v1.0 的 15.5%，MiniWoB++ 经委派 39.8% 对比直做 40.8%。父/子共享全局 metrics（成本/迭代计数），delegate_level 逐层递增，父 agent 在委派期间把事件转发给子 agent、自身暂停处理 ｜… | 论文 arXiv:2407.16741v3 Table：WebArena CodeActAgent v1.8 via delegation 15.3% vs BrowsingAgent 15.5%（同 claude-3-… | 同一批大仓库 issue：对照组单 agent 全程直做；实验组把浏览/测试运行/独立子模块修复委派给配置各异的子 agent。比较解决率、总 token、父上下文膨胀速度与父 agent 迷失率 |
+| 24 | **技能库到几十上百个量级时，把「选技能」从模型隐式路由改成 harness 侧显式预选**（S051，13分） | [arXiv: Lost in Implicit Routing: How LLM Agents Fail to Load Relevant Skills at Scale (202…](https://arxiv.org/abs/2610.18522) | 固定 SkillsBench 任务与 golden skill、只往库里加无关技能，会出现 skill routing collapse：agent 加载的技能越来越少甚至完全不加载，尽管相关技能始终在库中；由同一库做显式预选则不受影响。根因是无关技能的 description 造成语义干扰，以及「选技能」和「做任务」争夺同一份决策注意力。 | 加入 1,000 个无关技能后：loaded-skill recall 73.6% → 27.4%，zero-load rate 9.3% → 51.6%；同一库下显式预选仍保持 73.9% recall。… | 对照组：模型隐式路由（系统提示里给全量 name+description）；实验组：harness 用 BM25+重排先选 top-k 再注入。扫描「无关技能数量 ∈ {0, 100, 1000}」三档，比较技能 recall、zero-load rate 与最终 pass rate。 |
+| 25 | **按需工具检索（Tool Search Tool）与程序化工具调用（PTC）替代全量工具注入**（S055，13分） | [Anthropic Engineering: Introducing advanced tool use](https://www.anthropic.com/engineering/advanced-tool-use) | Tool Search Tool：工具标记 defer_loading，模型用 BM25/regex 按需展开定义，五服务器 50+ 工具场景工具定义 token 约 72K→3K、总消耗 77K→8.7K（节省 85%），代理式搜索评估准确率 Opus 4 从 49%→74%、Opus 4.5 从 79.5%→88.1%；PTC：模型在沙箱内写 Python 编排工具调用，复杂研究任务平均 token 43,588→27,297（降 37%），GIA 基准 46.5%→51.2%，内部知识检索 25.6%→28.5%，单段代码可编排 20+ 次调用消除约 19 次推理往返。 | Anthropic 官方数据，含具体场景规模（GitHub 35 工具等五服务器）与模型版本（beta header advanced-tool-use-2025-11-20，Sonnet 4.5+/Opus）。 | 固定模型与任务集，A/B 全量注入 vs Tool Search 检索式加载，再叠加 PTC vs 逐轮工具调用，测成功率、token、选错工具率与首 token 延迟。 |
+| 26 | **ACI：为 agent 定制接口而非照搬人类接口/裸 shell（SWE-agent）**（S060，13分） | [SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering (Yang et al., N…](https://arxiv.org/abs/2405.15793) | LM agent 是新型『最终用户』，需要专门设计的接口（有界视图、lint 反馈、护栏式守卫）：定制 ACI 显著提升 agent 创建/编辑文件、浏览仓库与跑测试的能力，SWE-bench pass@1 12.5%、HumanEvalFix 87.7%（均为当时 SOTA，超非交互式接口方案）。消融显示去掉 lint 护栏编辑 -3.0pt、只准 shell 重定向编辑 -7.7pt、搜索结果逐条翻页式反馈 -6.0pt、文件查看窗 30 行 -3.7pt、整文件 -5.3pt、保留全量历史 -3.0pt。… | 论文 §5：「An LM-friendly ACI's value is confirmed by SWE-agent's 64% relative increase compared to Shell-only, bo… | 同模型同任务集设四臂：shell-only（仅 bash）/ shell + 少量定制只读工具 / SWE-agent 式完整 ACI / 自研 ACI；统一 token 或统一美元预算，比较 resolved rate 与 $/resolved，产出帕累托前沿而不是单点最优；再对工具层做单变量消融（有/无编辑后 lint 回喂、搜索结果汇总 vs 逐条、观察窗口 30/100/全文件、历史全量 vs 截断），比较解决率与步数。 |
+| 27 | **SEARCH/REPLACE 柔性解析器 + 结构化错误反馈 + 反射上限（max_reflections=3）闭环**（S077，13分） | [aider](https://github.com/Aider-AI/aider/blob/main/aider/coders/editblock_coder.py) | 对模型产出的不完美编辑块做多级容错匹配（精确→容忍前导空白→跳过空行→"..."省略号还原→模糊匹配），失败时把结构化错误发回模型重试，最多反射 3 次；leaderboard 上第二段通过率普遍数倍于第一段。 | 代码核对（本地抓取）：aider/coders/editblock_coder.py:134 perfect_or_whitespace、:177 跳过空行重试、:190 try_dotdotdots（还原省略段）、:2… | A/B：对照组严格解析+失败即终止；实验组柔性解析链+结构化错误反馈+≤3 次反射；指标=最终落盘成功率、平均重试轮数、每任务成本 |
+| 28 | **Plausible-solution 门控的 best-of-N 编排：edit/lint/test 三段 outcome 遥测 + 分层选择 + 模型交替**（S078，13分） | [aider](https://aider.chat/2024/05/22/swe-bench-lite.html) | 每次 aider 运行输出 edit/lint/test 三段成功/失败状态；「plausible 解」=三段全清。harness 交替用 GPT-4o 与 Opus 各跑 3 次（共 6 次），找到首个 plausible 即接受；全败时按 outcome 分层选最优补丁（edit+lint 成功 > 部分编辑+lint 成功 > edit 成功 > 部分 edit 成功）。300 个任务产 79 个 resolved=26.3% SOTA；GPT-4o 的 plausible→correct 转化率 27.6%（239 个中 66 个）高于 Opus 21.3%。 | 官方博客方法论章节：第一次尝试即 resolved 20.3%，两次尝试 23.6%（占最终 resolved 的约 75%/90%），6 次尝试到 26.3%——每次重试都有边际收益但递减；… | 同一任务集 A/B：单实例单模型 vs 「≤6 次、双模型交替、首个 plausible 即停、全败按 outcome 分层」编排；指标=resolved 率、平均尝试次数、成本/resolved |
+| 29 | **CRITIC：工具交互式批评（执行信号 vs 纯语言自评的直接对照）**（S085，13分） | [CRITIC: Large Language Models Can Self-Correct with Tool-Interactive Critiquing (ICLR 2024…](https://arxiv.org/abs/2305.11738) | 只有把校验外包给工具（Python 解释器等）再据此修正，LLM 的自我修正才稳定增益；去掉工具改用纯语言自评后，增益消失甚至转负。 | Table 2（数学程序合成，exact match）：ChatGPT PoT 72.5 → CRITIC 78.2（GSM8K）、75.0 → 89.0（TabMWP）；… | 三臂等预算 A/B：执行反馈修正 vs 无执行反馈的纯语言自评 vs 盲重采样安慰剂；另加一臂『修正前强制运行 lint/类型/测试、模型只对工具报错逐条定点修正』，比解决率、token、无效修复率与二次破损率。 |
+| 30 | **官方并行测试时计算：多路并行 + 回归测试拒绝采样 + 内部评分模型选优**（S092，13分） | [Introducing Claude 4（Anthropic 官方博客，2025-05-22）](https://www.anthropic.com/news/claude-4) | SWE-bench Verified：Opus 4 72.5%（标准）→ 79.4%（parallel test-time compute），Sonnet 4 72.7% → 80.2%，各约 +7pp。 | 官方博客（直读核验）：high compute 档为『并行采样多个 attempts』，先丢弃破坏可见回归测试的补丁（类似 Agentless 的 rejection sampling，不使用隐藏测试），再用内部评分模型… | 对照组单路 agent；实验组 N 路并行 + 回归测试过滤 + 评分模型选优，报告 resolve rate 提升与每任务成本/时长。 |
+| 31 | **推理档位（effort / test-time compute 档）按任务难度调度**（S093，13分） | [Claude Opus 4.5 官方公告（Anthropic，2025-11）](https://www.anthropic.com/news/claude-opus-4-5) | medium effort 档即达到 Sonnet 4.5 在 SWE-bench Verified 的最好成绩且输出 token 少 76%；最高档超出 Sonnet 4.5 4.3 个百分点且 token 少 48%。 | 官方页面（直读核验）：'At medium effort, Opus 4.5 matches Sonnet 4.5's best score on SWE-bench Verified' + '76% fewer out… | 按任务难度分层（历史成功率或静态复杂度），A/B 固定 high 档 vs 难度自适应档位，比较 resolve rate 与每任务 token/费用。 |
+| 32 | **并行多尝试 + LLM chooser 选优（oracle pass@k 与裁判选优两层）**（S098，13分） | [SWE-agent（chooser 配置与 pass@k 曲线）](https://github.com/SWE-agent/SWE-agent) | 同一任务实例可并行产出多个补丁候选（max_attempts 10），再由一个强推理模型做 chooser 挑选；官方测得 pass@k 曲线：pass@1 17.94% → pass@6 32.67%，说明并行采样换覆盖率的收益是实在的。 | 配置证据 config/benchmarks/250212_sweagent_heavy_sbl.yaml:135-188：retry_loop: type: chooser，cost_limit 6.0、max_att… | 同一实例固定 n 个并行 worker（n=4 与 n=8 两档），一组用首个 submit 的补丁不做选择，一组用 chooser 选优；报告 oracle pass@n（上限）、chooser 实测 pass@n、以及随机挑选基线（否则无法判断 chooser 是否真有用）。 |
+| 33 | **CRBugBench：先量化『review agent 到底能抓多少真 bug』，再谈无人值守产线**（S106，13分） | [(When) Should a Software Factory be Lights-off? Benchmarking Code Review Agents on Bug Det…](https://arxiv.org/abs/2610.13668) | 构造 CRBugBench（1000 个评审任务 / 98 个开源仓库，外加某大公司 800 个私有仓库任务）评估 review agent 发现人工确认 bug 的能力：当前最强（claude-opus-5 + copilot-cli）在 top-5 评论内抓到 71.9% 的 bug，五个月内从 opus-4.6 的 47.7% 提升而来；但对复杂改动与需要非局部推理的 bug 明显掉点，在私有企业仓库上更差。 | arXiv 摘要原文（读取 abs 页确认）：1000 个评审任务跨 98 个开源 GitHub 仓库 + 800 个私有企业仓库任务；最佳配置 top-5 评论命中 71.9%（opus-4.6 为 47.7%）；… | 对照组：无评审直接合入；实验组：加 review agent（top-5 评论）作为合入 gate；比合入后逃逸到生产的缺陷数、评审耗时与 token 成本、以及误报导致的返工量。 |
+| 34 | **多 agent judge 在代码上不可靠：先做『接地性测量 + 弃权门控』，别靠加层数或多轮复核换可靠性**（S107，13分） | [When Is a Multi-Agent Code Judge Actually Grounded?（arXiv 2609.30328, MARCH 分析）＋ Cross-Con…](https://arxiv.org/abs/2609.30328) | MARCH 这类多 agent 验证框架在两个代码评判基准上共 80 组测量：78%–95% 的比较判定『两个候选同样好』，准确率只有 4.4%，同一模型被直接问时 43.7%；用管线自身日志做门控、对无法判定的比较弃权后，准确率从 20.7% 升到 36.9%，仍能回答一半比较。CCV 显示『简单重复验证』反而降低准确性——多轮评审产生假阳性的速度快于发现真错误；Worker→Verifier→Director 多阶段扩展得到 100% 谄媚性确认的负面结果；起作用的机制是信息隔离而非结构复杂度。 | arXiv 摘要原文（读取 abs 页确认）：MARCH——80 组测量、2 个代码评判基准；78–95% 输出『两者等价』；准确率 4.4% vs 直接问 43.7%；换更简单问题或更大 judge 都无效；… | 对照组：judge 必须二选一 / 同一会话内多轮自检 / 加一层 verifier；实验组：judge 允许弃权 + 用执行日志与静态检查做门控 + 信息隔离的多会话独立判定；在同一批已知对错的 patch 上比总体准确率、弃权率、假阳性率与『弃权后交给执行验证的误判率』。 |
+| 35 | **中心化依赖感知 DAG 委派 + 隔离工作区异步执行（CAID）**（S113，13分） | [论文《Effective Strategies for Asynchronous Software Engineering Agents》](https://arxiv.org/abs/2603.21489) | 把多 agent 协同建立在三个软件工程原生原语上：中心化任务委派、异步执行、隔离工作区；中央 manager 构建依赖感知的任务计划，子任务在隔离工作区并发执行，用可执行的测试验证做结构化集成。 | 基准证据：相对单 agent 基线，论文复现任务 PaperBench 上准确率提升 25.6 个百分点绝对值，Python 库开发任务 Commit0 上提升 14.7 个百分点。… | 对照组：单 agent 顺序完成同一任务；实验组：中央 manager 拆依赖图 + N 个隔离 worktree 并发 + 测试验证合并；扫并发度 N∈{1,2,4,8}，比较 PaperBench/Commit0 类任务成功率、墙钟时间与冲突合并失败率。 |
+| 36 | **上下文压缩：只保留最近 5 条 observation 全文，更早的折叠成单行**（S118，13分） | [SWE-agent](https://arxiv.org/abs/2405.15793) | 每步只把最近 5 条 observation 全文放进上下文、更早的压成一行，保留计划与动作轨迹但丢弃过期的文件内容；比保留完整历史高 3.0pp，在 Claude 3 Opus 上差距更大（8.1 对 5.4，相对 +50%）。 | 论文 Table 3（Context 消融，SWE-bench Lite / GPT-4 Turbo）：Last 5 Obs. 18.0；Full history 15.0（↓3.0）；… | keep_last 取 {2, 5, 10, 全量} 四档做扫描，锁定模型、窗口、温度；主指标 %Resolved，副指标总输入 token、有效轮数（达到 submit 的轮数）、因过期上下文导致的重复读取同一文件次数。 |
+| 37 | **评测有效性本身会让 A/B 结论失真：基准记忆污染 + agent 极少能自己发现首个错误**（S122，13分） | [Does SWE-Bench-Verified Test Agent Ability or Model Memory?（并以 DeepSWE、RepoMirage、Traverse…](https://arxiv.org/abs/2512.10218) | 主流仓库基准上的『反思/检索改进』分数提升可能部分来自模型记住了标准修复；且 agent 极少能自己发现首个错误，六个前沿 judge 也不行。 | 2512.10218：只给 issue 文本找相关文件，模型在 SWE-bench Verified 上比在 BeetleBox、SWE-rebench 上好 3 倍；… | 每轮 A/B 同时报三个数：SWE-bench Verified 分数、自造或扰动版分数、以及『agent 能否自行定位首个错误』（由独立 verifier 标注）；任一指标下滑即判为过拟合信号并停止扩量。 |
+| 38 | **harness 组件级可拆解消融：上下文管理/规划/动作空间（按模型分档）**（S129，13分） | [An Empirical Study of Harness Design for Coding Agents (arXiv 2609.20804)；…](https://arxiv.org/abs/2609.20804) | 在固定执行循环下单独消融三个组件（176 组匹配设置 × 4 模型 × SWE-Bench Verified + Terminal-Bench 2.1）：上下文管理的价值随窗口收紧而放大（managed−T0 差距从 32k 的 35.7pp 缩到 128k 的 2.7pp）；预定义工具集对 bash 不熟的弱模型提升 15.0pp（SWE-Bench）/10.1pp（TB），而强模型用 bash-only 反而更好且便宜（成本降 53%/30%）。 ｜… | Table 3（SWE-Bench Verified SR%）：32k 窗口下 T0(无管理)→T1(elision) 差距 30B 9.40→20.60、120B 11.40→43.00、550B 6.40→51.40… | 保持主循环不动，只替换 context-management 策略（T0/T1/T2/T3/T4）× 上下文窗口预算（32k/64k/128k）做网格；动作空间与 planning 各做一次单独开关，用 SR、overflow 率、tokens/题三项指标。 |
+| 39 | **harness 版本级回归防护：把 harness 当作需要持续回归测试的一等组件**（S130，13分） | [Don't Blame the Large Language Model: How Agent Harness Evolution Shapes Coding Agent Qual…](https://arxiv.org/abs/2607.03691) | 固定底层 LLM、只变 harness 版本，35 个连续 release 的 resolve rate 在 23.0%–39.0% 间大幅波动、均值 30.5%，与版本序无显著趋势（Spearman ρ=0.208, p=0.231）；同期 token 消耗从 391K 涨到 668K/题（+70%）却没有换来任何正确率提升。 | 对象：Qwen Code CLI 的 35 个连续 release；每版在 50 道分层 SWE-bench Verified 任务上跑两遍，87.7% 任务两次结果完全一致（resolve rate Wilcoxon … | 每次改动都跑固定回归集（同一批大仓库任务 + 固定模型 + 固定 seed），同时报 resolved 率与 token/题两条曲线，任一劣化超过阈值即阻断发布。 |
+| 40 | **并行子代理的动态并发策略：按任务时域长度决定是否并发（短任务不并发、长任务才并发）**（S132，13分，⚠勘误） | [When Sub-Agents Work in Parallel: The Promises and Pitfalls of Dynamic Concurrency in Long…](https://arxiv.org/abs/2610.10263) | 在 Codex / Claude Code / Kimi Code 三个前沿 coding agent 上做 2,124 次受控执行后发现：动态并发只在长时程任务上有效（LoopsBench 上 Codex 与 Claude Code 的任务通过率最多提升 14.3pp），在有界的 SWE-bench Verified 上零收益甚至大幅倒退（Claude Code 任务通过率 −24.0pp，p=5.08e-7）。 | 354 个任务来自 4 个长时程基准 + 1 个有界基准，2,124 次执行。LoopsBench（最长的时程基准）上并发使 Codex 与 Claude Code 的 task pass rate 最多 +14.3pp… | 在自有 harness 上做「并发开/关」配对执行，按任务规模与时程长度分桶统计 task/test pass rate、token、墙钟与失败模式；对照组固定串行、实验组开动态并发，同题配对做 McNemar 检验。 |
+| 41 | **交接税：升级时携带多少前序轨迹，会反向决定交接质量（负面/关键约束）**（S136，13分） | [The Handoff Tax: Continuing Non-Native Trajectories in LLM Agents](https://arxiv.org/abs/2608.24358) | 在长时程编码 agent 中把控制权从弱模型切到强模型，需要接收方接手一条「非本地」的轨迹；全文轨迹式升级只能收回弱→强模型质量差距的一半以下，同时付出显著成本溢价，作者称之为 handoff tax。反向的降级（强→弱）反而是划算的成本-质量点。 | 摘要原文：Across both model families, full-trajectory escalation recovers less than half of the LC-to-HC quality ga… | 三组交接接口：A 传完整轨迹、B 传压缩摘要（compaction）、C 传最后状态 + 最近 k 步；在升级触发点固定的前提下比最终 solve rate 与 token 成本，验证「升级时减少弱模型轨迹信息反而更好」这一反直觉结论。 |
+| 42 | **SOP 固化流水线：用结构化产物（PRD/系统设计/API 文档）替代自由对话交接**（S137，13分） | [MetaGPT: Meta Programming for Multi-Agent Collaborative Framework (ICLR 2024)](https://arxiv.org/abs/2308.00352) | 把人类软件公司 SOP 编码进 prompt 序列，角色间以文档、图表等结构化产物交接而非对话，声称切断「电话游戏」式误差累积与级联幻觉；HumanEval 85.9%、MBPP 87.7% pass@1；自建 SoftwareDev 基准（7 任务）可执行性 1-4 分制下 MetaGPT 3.9、ChatDev 2.1、AutoGPT/LangChain/AgentVerse 均 1.0（无法产出可运行代码）。 | 论文 v7 HTML Table 4：2048 game 任务上 AutoGPT/LangChain/AgentVerse 1 分、ChatDev 1 分、MetaGPT 4 分，7 任务平均 3.9 vs 2.1；… | 同一批真实仓库任务 A/B：对照组 agent 间自由对话传递上下文，实验组强制经结构化 artifact（schema 校验的 JSON/文档）交接，比通过率、返工次数与 token 成本。 |
+| 43 | **采样-投票横向扩展（More Agents Is All You Need / Agent Forest）**（S142，13分） | [More Agents Is All You Need (TMLR 2024, Tencent)](https://arxiv.org/abs/2402.05120) | 无需任何 agent 间通信，多实例采样 + 多数投票即可让性能随 agent 数量增长：HumanEval GPT-3.5 0.67→0.73（ensemble 40，+4%–9%）；MMLU GPT-3.5 0.59→0.70（+5%–11%）；GSM8K Llama2-13B 0.35→0.59、GPT-3.5 0.73→0.85；按推理步投票再获 +15%–42%。 | 论文 HTML 全文核实（Table 2/图）：MMLU Llama2-13B 0.42→0.51、Llama2-70B 0.55→0.60、GPT-3.5 0.59→0.70；… | 对照=单次采样；实验=N∈{4,8,16} 路采样 + 测试结果加权投票（无测试时多数投票），画 resolve rate vs $/issue 帕累托曲线。 |
+| 44 | **LLM 消解合并冲突的门禁化（Merge-Bench：最强模型正确率 <60%，必须建议+强验证）**（S146，13分） | [Resolve Merge Conflicts with Large Language Models (Merge-Bench, Univ. of Washington / Mic…](https://arxiv.org/abs/2605.25890) | 构建 7,938 个真实合并冲突 hunk（1,439 个公开 GitHub 仓库、11 种语言，以开发者实际提交的消解为 ground truth）评测 LLM：最强模型 Gemini 2.5 Pro 多语言合计仅 52.6%（Java 62.5%）——「最好的模型也只能正确消解不到 60% 的合并冲突」；作者自训的 14B GRPO 模型（LLMergeJ）58.9%，超过多个更大的商用模型。 | 论文 HTML 全文核实：Java 集合上 Gemini 2.5 Pro 62.5%（精确文本 54.7%）、o3 Pro 54.3%、Claude Opus 4 51.2%、Qwen3-14B SFT 44.7%、LL… | A/B：并行任务的合并阶段，对照组纯 git 合并 + 规则/人工，实验组 LLM 合并建议 + 测试门禁放行；比较冲突自动消解率、错误合并逃逸数与下游破坏。 |
+| 45 | **分层基准组合：公开饱和集做回归、活水集做外推**（S147，13分） | [SWE-bench-Live（Microsoft，NeurIPS 2025 D&B）](https://arxiv.org/abs/2505.23419) | 同一 harness+模型（OpenHands + Claude 3.7 Sonnet）在 SWE-bench Verified 上解决率 43.20%，在全量 SWE-bench-Live 上仅 19.25%（降一半以上）；月度自动刷新的任务流（RepoLaunch 管线）可持续供给未被污染的仓库级任务。 | SWE-bench-Live 论文：1,319 个实例、93 个 Python 仓库（2024-01 至 2025-04 的真实 GitHub issue）；Lite 子集 300 实例。… | 对照组只在固定 Verified 快照上评测 harness 改进，实验组加入月度刷新的 Live 式新任务分片；用两组名次/增益的相关性检验改进是否真实可外推，而非只在旧任务上过拟合。 |
+| 46 | **评测即实验：置信区间、配对差分析与功效分析**（S150，13分） | [Adding Error Bars to Evals（Evan Miller, Anthropic, 2024）](https://arxiv.org/abs/2411.00640) | 评测是抽样实验：给出三组公式分别用于分析评测数据、度量两模型差异、规划评测实验（功效分析定样本量），并论证应使用聚类标准误与配对差分析来避免 CI 虚窄。 | 方法论论文（被引 ~180 次）：把评测题目视为来自「超级总体」的样本；提供 cluster bootstrap/聚类标准误、两模型配对差检验与实验前功效分析公式；… | 产线规则：任何 harness 对比必须 (1) 按 repo 聚类的 cluster bootstrap 95% CI；(2) 优先做同任务配对差分析而非只比总分；(3) 实验前用功效公式反推所需实例数与重复次数；(4) CI 不含 0 不得宣布改进。 |
+| 47 | **榜单小差距不可排序：实例级配对检验 + model-scaffold 溯源**（S151，13分） | [Coding Agents Have Converged: Why the SWE-bench Leaderboard Can No Longer Order Its Top En…](https://arxiv.org/abs/2609.17394) | 审计 254 个 SWE-bench 提交（不重跑模型）：Verified 前两名各解 396/500 题、前十名共享 285 个成功与 51 个失败、真正能区分它们的实例只有 164 个；同模型不同 scaffold 的分数差最大达 29.8 个百分点（而前三十名总分极差仅 8.8pp）；精确配对 McNemar 检验在 α=0.05 下无法区分 Verified 前三十中任何一对相邻名次（0/29 对），Test split 仅 14/23。 | 论文对四个人气 split 的 254 份提交做实例级集合分析：frontier 方案成功率中位嵌套度 0.935（对照「分数隐含」基线 0.774），说明头部方案解的是几乎同一批题；… | 每次 A/B 保存 per-instance 通过矩阵；报告「分辨实例数」（两版本结果不同的任务数）与配对检验 p 值，而非只报总分；发布任何对比时附 model + scaffold 溯源（模型版本、scaffold 提交哈希、采样参数），仿官方 leaderboard 的 sb-cli 规范。 |
+| 48 | **成本归一化指标：同等成本解决率 / 同等解决率成本**（S152，13分） | [Epoch AI: The Plunging Price of Thought (2026-09) + aider polyglot 榜单](https://epoch.ai/publications/the-plunging-price-of-thought) | 达到同等基准性能的推理成本自 2023 年以来每季度下降约 47%（约每年 13 倍）：GPQA Diamond 75% 分数的成本从 o3（2025-01）约 $0.30/题跌至 GPT-5.6 Luna 约 $0.0004/题（约 725 倍，原文口径；按本条所列舍入价格 $0.30/$0.0004 计算为 750 倍，差异源于价格舍入）；性能刚成为 SOTA 时成本每季降 66%，两年后仅 32%。aider 榜单同时报告分数与每次运行成本：gpt-5(high) 88.0% / $29.08，DeepSeek-V3.2-Exp 70.2% / $0.88。 | Epoch 对 AIME、Chess Puzzles、FrontierMath(1-3)、GPQA Diamond、Mystery Game Puzzles 五个主基准拟合「性能-成本」曲线（SWE-bench Veri… | 每条 rollout 记录 token 与 $ 成本（按调用当日价格）；A/B 主指标改为「固定成本预算下的解决率」或「固定解决率下的成本」，并绘制 cost-quality 前沿；报告两个版本在前沿上的支配关系而非单点分数。 |
+| 49 | **from-scratch 组件生成评测与反馈源消融（单测迭代 vs 静态分析）**（S153，13分） | [Commit0 (Zhao et al., ICLR 2025, arXiv:2412.01769)](https://arxiv.org/abs/2412.01769) | 给定规格文档从零写整库（54 个 Python 库，lite 子集 16 个）：无反馈时 SOTA 模型在较易库只过 17% 单测、全量库仅 6%；对单测报错做迭代把较易库通过率提到 26%；换成 SWE-bench 式 agent（OpenHands）在 lite 上达 42.95%（比 SDE-I 高 13.65pp）、全量 15.25%；静态分析反馈对开源权重模型反而有害（Llama-3.1-405B 从 8.08% 降到 1.76%）。 | 论文消融三级反馈：Claude 3.5 Sonnet 在 lite 上 stage1（仅草稿）17.80% → stage2（+静态分析）18.79% → stage3（+单测错误迭代）29.30%（成本 $99.39）… | 对内部新模块任务建立「规格 + 单测」评测包；A/B 比较反馈环配置：无反馈 vs 单测错误迭代 vs +静态分析，按模型分层做（开源/闭源权重分开），主指标为单位测试通过率与 $ 成本。 |
+| 50 | **停滞计数 + 重规划 + 重规划时全员上下文清零（stall counter 带衰减）**（S157，13分） | [Magentic-One 论文 (arXiv:2411.04468) + AutoGen `_magentic_one_orchestrator.py` 源码](https://github.com/microsoft/autogen/blob/main/python/packages/autogen-agentchat/src/autogen_agentchat/teams/_group_chat/_magentic_one/_magentic_one_orchestrator.py) | Orchestrator 维护停滞计数器：判定为无进展或陷入循环则 +1，判定有进展则 -1（下限 0）；计数达到阈值即跳出内循环，更新任务账本、重写计划，并让所有 worker agent 清空上下文与状态后重新开始。阈值是超参：论文实验用 ≤2，AutoGen 库默认 max_stalls=3。 | 源码 _magentic_one_orchestrator.py:394-399 三分支：if not progress_ledger["is_progress_being_made"]["answer"]: self.… | 对照组＝无重规划（停滞只记日志不换计划）；实验组＝带重规划，max_stalls ∈ {1,2,3,5}；同任务同 seed 比较解决率、每任务 LLM 调用数与「同一错误重复出现次数」。 |
+| 51 | **规则/技能极性治理：只写负向约束（「不要重构无关代码」），不写正向指令（「遵循代码风格」）**（S161，13分） | [Guardrails Beat Guidance: A Large-Scale Study of Rules, Skills, and Persistent Configurati…](https://arxiv.org/abs/2604.11088) | 随机规则与专家精编规则对 coding agent 的提升相当（两者均 +13.8pp，测于 SWE-bench Verified 的判别性子集）；收益基本与内容无关（打乱、错领域、错格式的规则文件都能追平精编规则，指向 context priming 机制）；单独看有益的规则全是负向约束，单独看有害的全是正向指令；规则条数从 0 到 50 时通过率保持稳定，个体有害规则在集合中不累积伤害 ｜ 〔并集·Guardrails 负向约束(gapfill3)〕首个关于 agent 规则文件的大规模对照研究：随机规则对 coding agent 任务表现的提升与专家精编规则几乎相同（在一个可判别子集上都是 +13.8pp）；… | 本次通过 arXiv API（id_list=2604.11088）读取原文摘要核实：抓取 679 个规则文件（CLAUDE.md、.cursorrules 及 agent skills / plugin manifes… | 把仓库级规则集拆成三组做 3×N A/B：全负向约束 / 全正向指令 / 空规则；每组固定同一批任务与模型，比较 pass rate 与 token；同时做「规则条数 0/10/25/50」的剂量曲线验证集合稳定性。 |
+| 52 | **开发者手写的抽象级技能 > agent 自动合成的轨迹级技能（成本侧证据）**（S163，13分） | [Analyzing and Mitigating Cost-Inefficient Behaviors in Coding Agents（arXiv 2609.30725，2026…](https://arxiv.org/abs/2609.30725) | 三类低效行为（subsumed retrieval、相似脚本重复生成、测试重复执行）影响 79.00%–98.00% 的编码任务，占任务成本最高 22.75%；缓解手段对比中，开发者设计的高层、与轨迹无关的技能把成本降低最多 41.73%，约为 agent 自合成技能最大收益的两倍；agent 自合成技能倾向产出低层、绑定具体轨迹的指导因而泛化差；结构感知检索反而引入检索开销并改变 agent 分派，导致成本最多上升 28.14% | 本次通过 arXiv API（id_list=2609.30725）读取原文摘要核实：先分析 Claude Code 与 Mini-SWE-Agent 在 SWE-bench Verified 上四种配置共 1,200 … | 三臂 A/B（developer-designed skills / agent-synthesized skills / structure-aware retrieval 接入）+ 纯基线，四臂同任务同模型，主指标为「每成功任务的 token 与美元成本」，通过率作为约束指标而非优化目标。 |
+| 53 | **深度 agentic 检索 vs 预建语义索引：对可索引仓库，前者未必更好且更贵**（S166，13分） | [Deep Agentic Search for Repository-Level Code Question Answering: An Empirical Study（arXiv…](https://arxiv.org/abs/2608.01507) | 对只读的仓库级代码问答，SWE-QA 上语义搜索答对 65.2%，深度 agentic 检索（规划 agent 派子 agent 在隔离上下文窗口里 grep）只答对 46.2%，且前者产出每个正确答案的成本不到后者的一半；失败模式编码显示深度 agentic 检索没有消除失败而是引入新的一类——其失败中最大占比 41.8% 发生在规划者与子 agent 的交接处，且通常是静默失败，表现为流畅自信的错误答案 | 本次通过 arXiv API（id_list=2608.01507）读取原文摘要核实：65.2% / 46.2% 两个正确率、"cost less than half" 的成本比较、以及 41.8% 交接处静默失败的分类… | 同一批只读仓库理解任务 A/B：预建向量/BM25 索引直查 vs 规划者+子 agent 隔离检索；主指标正确率，次指标每题成本，并单独统计交接处静默失败率。 |
+| 54 | **编辑接口三段式解耦：Viewer（按需抽码）+ 主 agent + Editor（自然语言指令直接落盘）**（S173，13分） | [SWE-Edit: Rethinking Code Editing for Efficient SWE-Agent（Microsoft，arXiv 2604.26102v2, 20…](https://arxiv.org/abs/2604.26102) | 把「看代码 / 规划改动 / 执行编辑」从一个上下文里拆开：Viewer 子 agent 按自然语言查询抽取任务相关代码片段，Editor 子 agent 接收自然语言编辑指令直接改文件（主 agent 不再写格式敏感的 search/replace）。SWE-Bench Verified 500 个真实 GitHub issue 上 resolve rate 69.9%→72.0%（+2.1pp），总成本 $243.7→$200.1（-17.9%），编辑成功率 93.4%→96.9%（+3.5pp），主 agent 非缓存 input token 276.7K→181.3K（-34.5%）。 | 论文 Table 1（500 instances，每配置跑 3 次取平均）逐行消融：Baseline(Anthropic str_replace_editor) 69.9 / $243.7 / viewer 5.78 /… | 对照组 = 现有 harness（模型自己 cat + 自己写 search/replace）；实验组 = 同模型、同任务、同 token 预算，把 view 与 edit 拆成两个子 agent（先可用小模型承接）；在同批 SWE-bench Verified 风格的大型仓库 issue 上跑 3 次，比较 resolved rate、edit success rate、总 token 与美元成本三项。 |
+| 55 | **上下文文件（AGENTS.md/CLAUDE.md）本身不保证正确性：把工程预算从「写文件」挪到「调优文件」**（S178，13分） | [Do Context Files Help Coding Agents? A Two-Agent Ablation Study on Real Repositories（arXiv…](https://arxiv.org/abs/2607.27250) | 在两个前沿 agent（Claude Code、Codex）、3 个真实仓库、17 个真实任务（15 个共享 + 2 个 Codex 专属）、288 次带金标准测试的运行上做上下文注入策略消融：上下文策略在任何一个 agent 上都没有可测地移动正确性（等价性检验把效应上界压到 ≤10–15pp）；失败分诊显示 agent 失败在实现能力（功能设计、模式选择、精确接线），而不是缺上下文文件能补的仓库知识；一个操纵探针确认真实 AGENTS.md 在两个 agent 上都没能把「差一点」变成通过。 | 论文摘要给出样本量、等价性检验界限与失败分诊结论；代码、数据与分析全部公开。论文还给出一个解释既有矛盾结论的候选原因：任务是否处在「接近阈值」的难度带是 agent 特定的（Spearman rho=0.75），所以单 … | 对照组 = 真实仓库的 AGENTS.md/CLAUDE.md 原样注入；实验组 = 同任务但移除上下文文件或替换成无关内容（随机/错域内容）；用等价性检验而非显著性检验设定可接受的最小效应，再比较 pass rate。 |
+| 56 | **Context rot：按有效（而非标称）上下文设预算（含编码任务预填充复现）**（S005，12分，⚠勘误） | [Chroma《Context Rot》技术报告（2025-07）+ boolean.ai 编码任务复现（2026-09 博客）](https://www.trychroma.com/research/context-rot) | 输入越长性能越不可靠且非均匀：18 个模型、约 194,480 次 LLM 调用，NIAH 变体、LongMemEval、重复词任务均随输入变长衰减；干扰项从 0→1→4 个逐级拉低准确率；LongMemEval 上全量输入（均值 ~113k token）显著差于 ~300 token 聚焦输入。编码复现：terminal-bench v4 的 20 个任务预填充 250k token 后，GPT-5.6 Sol 通过率 31%→24%（500k 保持）；Claude Opus 5 在任务相关预填充（Apache Spark）下 50%→40% | Chroma 官方报告：18 模型×4 家族（Claude、OpenAI、Gemini、Qwen3），NIAH 设 8 种输入长度×11 个针位置、温度 0、GPT-4.1 判分（与人工一致率>0.99）；… | 复刻 boolean.ai 协议：固定任务集，按 0/25%/50% 注入历史或预填充（相关/无关两种），画通过率-预填充长度曲线找拐点；对照组为每次全新上下文 |
+| 57 | **tree-sitter 符号抽取 + 文件依赖图 PageRank 排序的「仓库地图」**（S010，12分） | [aider (Aider-AI/aider) 官方 repo map 文档与源码 aider/repomap.py](https://aider.chat/docs/repomap.html) | 用 tree-sitter 解析源码抽取类/函数定义与签名，在「文件=节点、文件间依赖=边」的图上跑 personalized PageRank，按 token 预算（默认 1k token）裁剪出最相关片段，拼进每次改码请求 ｜ 〔并集·aider repo map 代码取证(70.3%定位)〕静态分析全仓 AST 构建符号定义/引用图，以文件为节点、引用为边跑 PageRank，输出按 token 预算截断的「最重要符号签名」地图；SWE Bench Lite 上 aider 正确定位待编辑文件的比例为 70.3%（用 gold patch 事后统计，求解过程不可见）。 | 实现细节来自 aider/repomap.py：networkx 的 nx.pagerank(G, weight="weight")，personalize=100/len(fnames)（聊天内文件与被提及符号获更高个… | 对照组 = 关闭 repo map（只按需 read 文件）；实验组 = 开启同一 tree-sitter+PageRank 地图（模型、prompt、工具、编辑格式完全一致）；在大仓库任务集上比最终解决率、平均输入 token、文件定位命中率三项 |
+| 58 | **把可复用知识包（skill）以「带明确输入-输出契约的 subagent」执行，而不是加载进主上下文**（S027，12分） | [Subagents vs Agent Skills: Executing Reusable Knowledge for Long-Horizon Agentic Tasks (ar…](https://arxiv.org/abs/2609.09233) | 在长时程任务中，把 skill 包交给独立 context 的 subagent 执行，可在上下文过载时优于'把 skill 指令塞进主上下文'的 skill 执行；强模型下 subagent 执行在超过 80% 的任务上降低峰值上下文长度 | 论文结论：'subagent execution performs better and degrades more gracefully than agent skill execution as initial co… | 同一批大仓库任务 + 同一组 skill 包，做 2×2：{skill 加载进主上下文, skill 交由 subagent} × {人工写 skill, 契约化 skill}，比较成功率与峰值上下文长度 |
+| 59 | **fresh-context 终审：把评审放到完全干净的会话里做，而不是同一会话内自我复审**（S029，12分） | [Cross-Context Review: Improving LLM Output Quality by Separating Production and Review Ses…](https://arxiv.org/abs/2603.12123) | 在同一会话内让模型复审自己的产出抓不到错误；把评审放进无生产历史的新会话（fresh session）才有增益：CCR F1 28.6% vs 同会话二次复审 21.7% | 受控实验：30 个产物（代码、技术文档、演示脚本）、150 个注入错误，四个条件——同会话自审 SR、重复自审 SR2、带上下文 subagent 评审 SA、跨上下文评审 CCR。… | 对照组=主 agent 同会话内自审；实验组=开一个只喂最终 diff/产物、不喂生产历史的干净会话做终审；在注入缺陷的仓库补丁集上比较缺陷检出率/F1，并统计额外 token 与轮次成本 |
+| 60 | **durable state + phase-local context + 可检查状态转移 + runbook 的 harness 规模化（StateM）**（S031，12分） | [StateM: Reaching 95.3% Raw Accuracy, or a $15 Frontier Run, on Terminal-Bench 2.1 via Harn…](https://arxiv.org/abs/2608.15089) | 不改模型权重、只扩 harness（持久状态、阶段局部上下文、被检查的转移、可恢复 runbook、版本化实践），即可把长时程 agent 的通过率从 83.1% 提到 92.1%~95.3%，并把 API 花费从 574.68 美元降到约 15 美元〔口径注（本报告）：$574.68 为前沿模型参考运行的成本口径、约 $15 为 StateM harness 配置的成本口径，两者非同一模型配置，不能按「同配置 38 倍下降」引用〕 | 摘要：'StateM raises GPT-5.5 xhigh to 92.1%, versus 83.1% reference and GPT-5.6 Sol Ultra at 91.9%'；… | 对照组=现有 harness（单一累积上下文 + 自动压缩）；实验组=加 durable state/phase-local context/runbook 层的同一 harness；同模型、同任务集（Terminal-Bench 2.1 或自家大仓库集），比较通过率、每任务 token/美元与跨 run 方差 |
+| 61 | **压缩摘要必须做来源校验（Source-Judged Compaction）：把「环境里没发生过的事」从摘要里剪掉**（S032，12分） | [Prune the Summary, Not the History: Source-Judged Compaction for Long-Horizon Agents (arXi…](https://arxiv.org/abs/2610.20927) | 压缩摘要会混入压缩器自己写的推理，agent 事后无法区分事实与臆测；在广泛使用的结构化压缩器上，83% 的失败运行可追溯到'执行了一条环境输出并不支持的摘要条目' | 摘要：'In an analysis of a widely used structured compressor, 83% of failed runs trace back to an action that car… | 对照组=现有 compaction 流程；实验组=在压缩后加来源判定（判定器可用小模型）；在同一批长时程大仓库任务上比较通过率、跨 run 稳定性与'由无出处摘要条目导致的失败'占比 |
+| 62 | **长上下文不要塞进 prompt，改用 coding agent + 文件系统外部化处理（可编程检索替代语义检索）**（S035，12分） | [Coding Agents are Effective Long-Context Processors (arXiv 2603.20432)](https://arxiv.org/abs/2603.20432) | 把长上下文处理外部化为'可执行交互'（agent 用原生工具在文件系统里组织与操作文本），在多个长上下文基准上比已发表 SOTA 平均高 17.3% | 摘要：'we study whether long-context processing can be externalized from latent attention into explicit, executab… | 对照组=直接长上下文（预填大段仓库内容）；实验组=agent 用文件工具分页检索与脚本过滤；在大仓库理解/修复任务上比较正确率、token 与耗时 |
+| 63 | **A/B 主战场选长时域终端基准（Terminal-Bench 2.0 / Long-Horizon-TB），并做多阶段持续评测而非单次通过率**（S037，12分） | [Terminal-Bench 2.0（89 tasks，arXiv 2601.11868）与 Long-Horizon-Terminal-Bench（46 长时域任务，arXiv …](https://arxiv.org/abs/2607.08964) | 长时程 harness 改进需要在'需要数百个 episode、分钟到小时级执行'的基准上验证：LHTB 上 agent 平均每任务消耗 990 万 token、约 231 个 episode、85.3 分钟执行时间，最强模型 pass@1 也仅 15.2%（部分奖励阈值 0.95），均值仅 4.3% | LHTB 摘要：'agents consume on average 9.9M tokens per task, with roughly 231 episodes and 85.3 minutes of executi… | 以 LHTB/Terminal-Bench 2.0 子集做每轮 A/B（同一模型、同一预算、同 seed 多次重复），主指标用 pass@1 + 部分奖励 + token 成本 + 跨 run 方差 |
+| 64 | **技能选择优先用传统 IR（BM25 + 小重排）而非 LLM 中介检索循环**（S052，12分） | [arXiv: SkillSeek: Revisiting Agent Skill Retrieval at Marketplace Scale (2026-09)](https://arxiv.org/abs/2609.38822) | 在 marketplace 规模的技能库上，标准 IR 配方（BGE-base 双编码器 + 小 cross-encoder，以 MCP 暴露）与文献中「让 LLM 在决策循环里改写查询、精排候选」的做法达到实测持平，而后者每个任务都要付 LLM token。 | 在 89 任务 SkillsBench 上做 pool×backbone×method 的 4×11 网格：纯 BM25 在 4 个设置中的 3 个上 pass rate 已不低于被改进的 LLM 循环，小 cross-… | 同一批仓库任务，三组：模型隐式路由 / BM25+cross-encoder 检索预选 / LLM 中介检索循环；比 pass rate、每任务成本与召回，并单独统计「gold 技能是否被选中」。 |
+| 65 | **反例基线：纯 bash 极简 harness（mini-swe-agent，SWE-bench Verified 74%+）**（S064，12分） | [mini-swe-agent 官方文档与仓库（Princeton/Stanford SWE-agent 团队，2025 起持续维护）；…](https://github.com/SWE-agent/mini-swe-agent) | mini-swe-agent「Does not have any tools other than bash — it doesn't even use the tool-calling interface of the LMs」，官方声明在 SWE-bench verified 上 >74%，且启动比 Claude Code 更快；官方文档直言「2024 年我们强调工具与专用接口，一年后其中很多已不必要」。实现形态：约 100 行 Python 的线性 ReAct 循环，每次动作用 subprocess.run 独立执行，可无缝换成 docker exec 以便沙箱化与并行扩展；… | 官方 README（已核对原文）："scores >74% on SWE-bench verified!"、"no tools other than bash"、完全线性消息历史、每次动作用 subprocess.run… | 对照：自研重型 scaffold；实验：bash-only 100 行循环（同模型同任务集），比较解决率、成本、单容器资源占用与并行吞吐；并把自研 harness 的「工具层」做成可插拔，同 prompt/模型/上下文策略下切换 shell-only 与 ACI 工具层跑同一批大仓库 issue。 |
+| 66 | **编辑格式作为一等实验变量：按模型路由（diff/whole/udiff）+ unified diff 三件套 + 合规率先导指标**（S065，12分） | [aider polyglot 基准榜单 polyglot_leaderboard.yml + 官方模型配置 adv-model-settings.md（225 道 Exercism…](https://aider.chat/2024/12/21/polyglot.html) | 没有对所有模型都最优的编辑格式：GPT-4 级模型用 diff（SEARCH/REPLACE），弱模型用 whole，GPT-4 Turbo 家族用 udiff，Gemini 用 diff-fenced；aider 为每个模型内置最优格式并持续用基准校准。同一模型只换编辑格式，成绩可差近 2 倍：Qwen2.5-Coder-32B-Instruct 用 diff 格式通过率 8.0%、格式合规率 71.6%、畸形响应 148 次；改用 whole 格式通过率 16.4%、合规率 99.6%、畸形响应 1 次。格式合规率（percent cases well formed）可作选型的先导指标。 ｜… | 代码核对（本地抓取仓库文件）：aider/website/docs/config/adv-model-settings.md 中全部模型条目的 edit_format 分布为 diff×289、editor-diff×1… | 对每个待用模型，在同一批真实仓库任务上跑 whole / diff(search-replace) / diff-fenced / udiff 四种格式各 N 次；A/B 单一编辑格式 vs 按模型路由的格式映射。主指标 resolved rate 与补丁一次应用成功率，副指标格式合规率、畸形编辑导致的文件损坏数、token/任务；用格式合规率做早期筛选再跑全量。 |
+| 67 | **不要用 JSON / function-call 承载代码正文，代码用 markdown 或专用文本块返回**（S066，12分） | [aider 官方博客《LLMs are bad at returning code in JSON》(2024-08-14) 与官方数据 code-in-json.yml（133 …](https://aider.chat/2024/08/14/code-in-json.html) | 把代码包进结构化 JSON 会同时降低通过率并引入更多语法错误：deepseek-coder V2 0724 Markdown 59.4–61.7% vs JSON 48.9–53.4%；claude-3.5-sonnet Markdown 60.2–60.9% vs JSON 51.9–55.6%；OpenAI 的 strict JSON 模式也无改善（gpt-4o-2024-08-06 JSON 56.4–60.2% vs JSON(strict) 54.1–59.4% vs Markdown 60.2–61.7%）。… | 官方数据 code-in-json.yml 逐行可查：deepseek-coder V2 JSON 行 pass_rate_1 = 48.9/49.6/50.4/53.4×2 且 syntax_errors 2–11、i… | 同模型同任务集两臂：编辑内容走 JSON tool-call（含 provider 级 strict/structured output）vs 走 markdown 代码块 + 解析器，各 5 次重复取均值；统计通过率均值±极差、落盘后语法错数、解析失败率、token/任务。 |
+| 68 | **lint 引导的编辑要单独做「功能保持」评测，不能只看 lint 告警减少量**（S068，12分） | [LintEval（arXiv 2610.20027, EMNLP 2026 Findings）](https://arxiv.org/abs/2610.20027) | 在 lint 引导的代码重构上存在稳定权衡：闭源商业模型 lint Reduction@P 最高达 90.4%，但功能保持的 Pass@1 只有 67.1–68.3%；开源小模型甚至出现低或负的 Reduction@P；监督格式会直接决定上限（SFT 后 Qwen2.5-Coder-7B 的 Reduction@P 从 24.7% 升到 76.0%） | LintEval 摘要：多语言（C++/Python/Java）基准，含 13,061 个功能正确程序与 171,662 条 lint 告警，同时评功能保持、告警减少、避免新增告警与编辑最小性；… | 编辑管线两臂：仅按测试/语义校验落盘 vs 额外引入 lint 门（只拦致命项）；主指标 resolved rate 与「无关文件改动行数」占比，辅指标 lint Reduction@P；并在同一批带大量历史 lint 的真实仓库上跑以放大该权衡。 |
+| 69 | **混合验证器：执行型 + 无执行型互补（R2E-Gym）**（S072，12分） | [R2E-Gym: Procedural Environments and Hybrid Verifiers for Scaling Open-Weights SWE Agents …](https://arxiv.org/abs/2504.07164) | 用程序化生成的可执行环境（8.7K 任务）做训练与测试时扩展：单一验证器（执行式或打分模型）各自饱和在 42-43%，混合后把 SWE-bench Verified 推到 51%（约 26 rollouts/实例，开源模型当时 SOTA）；32B 模型经环境内训练 pass@1 34.4% ｜ 〔并集·R2E-Gym(C分片)〕在真实仓库 issue 基准上，纯执行型与纯语言型 verifier 单独使用都会饱和在 42–43%（test-based 区分度低，execution-free 有偏且常依赖表层风格特征），组合后可把 pass@1 推到 51%。 | 论文摘要（已核对原文）："our approach achieves 51% on the SWE-Bench Verified benchmark"；… | 同一任务并行生成 N 个候选 patch，三组选择器：随机/单候选（对照）、执行验证（跑回归测试）、执行+打分模型混合；比较最终 resolve rate、验证器误杀率与容器时开销 |
+| 70 | **SWE-bench 数据质量审计：解法泄漏、弱测试与知识截止污染（SWE-Bench+）**（S076，12分） | [SWE-Bench+: Enhanced Coding Benchmark for LLMs (Aleithan et al., 2024)；…](https://arxiv.org/abs/2410.06992) | 原版 SWE-bench 中 32.67% 的『成功』patch 靠 issue 文本直接泄露答案作弊，31.08% 的通过 patch 因测试太弱而可疑；过滤后 SWE-Agent+GPT-4 解决率从 12.47% 跌至 3.97%；94% 以上 issue 早于模型知识截止日 ｜ 〔并集·SWE-Bench+ 审计(C分片,含DeepSWE)〕SWE-bench（含 Lite 与 Verified）有系统性数据质量问题：SWE-Agent+GPT-4 成功补丁中 32.67% 属 solution leakage（解法写在 issue 或评论里）、31.08% 因测试太弱可疑；过滤后解决率 12.47%→3.97%；… | 论文摘要（已核对原文）："32.67% of the successful patches involve cheating as the solutions were directly provided"、"31.08… | 对自建任务集做同等审计：随机抽检解决案例是否接触过答案/测试文件，统计『改测试文件』『空 patch 通过』比例；用去泄漏子集复测各策略排名是否翻转 |
+| 71 | **Benchmark 方法论包：两段式计分 + 格式符合率 + 失败遥测 + 难度校准选题 + API 非确定性重复测量**（S079，12分） | [aider](https://aider.chat/docs/leaderboards/) | aider leaderboard 的可迁移方法论：(1) 每条目同时报 pass_rate_1/pass_rate_2（首过率/重试后率）与 percent_cases_well_formed（格式符合率）；(2) 遥测 error_outputs、num_malformed_responses、syntax_errors、indentation_errors、lazy_comments、exhausted_context_windows、test_timeouts、seconds_per_case、total_cost；(3) polyglot 基准用 7 个模型集合筛出「≤3 个模型能解」的 225/697 题，反饱和设计；… | 本地抓取核对：benchmark.py:486-526 遥测字段聚合、:846-852 lazy_comments 正则（^+#... ...）、README.md 要求 docker 内执行（LLM 代码无监督运行）；… | 把该方法论固化为自研评测台：任何 harness 改动跑 ≥3 重复×同一任务集，报告 p1/p2、well-formed%、错误类型直方图与成本时延，替代单次运行对比 |
+| 72 | **Best-of-N + 模型生成测试投票选优（test-based voting + 终审轨迹）**（S094，12分） | [CodeMonkeys: Scaling Test-Time Compute for Software Engineering（Stanford ScalingIntelligen…](https://arxiv.org/abs/2501.14723) | SWE-bench Verified 57.4%，总预算约 2300 美元；对已有顶级提交做 ensemble 选择可得 66.2%，超过 ensemble 中最好成员。 | arXiv 摘要（直读核验）：'resolves 57.4% of issues from SWE-bench Verified using a budget of approximately 2300 USD'；… | 对照单轨迹；实验组 N 轨迹 + 生成测试投票选优，消融『有/无投票』『有/无终审选择轨迹』『单源/跨源候选』。 |
+| 73 | **CodeT 双执行一致性：自生成测试对并行候选做双重投票选优**（S099，12分） | [CodeT: Code Generation with Generated Tests（ICLR 2023, Microsoft）](https://arxiv.org/abs/2207.10397) | 同一 LM 并行生成候选程序与测试用例，按双执行一致性（代码过测试+测试过代码，输出与生成测试的一致性 + 输出与其他代码样例的互相一致性）排序选优；HumanEval pass@1 65.8%，较 code-davinci-002 绝对提升 18.8 个点，较此前 SOTA 提升 20%+；在 4 个基准、5 个模型上一致提升。 | arXiv 摘要原文（curl 读取 abs 页确认）：'CodeT improves the pass@1 metric on HumanEval to 65.8% ... an absolute improvemen… | 对照组：只用 majority voting 或 LLM-as-judge 选 patch；实验组：启用生成测试 + dual execution agreement 选 patch；在同一批真实仓库 issue 上比 resolved rate、token 成本与『被选中 patch 的真实正确率』（gold patch/人工复核抽样校准）。 |
+| 74 | **Otter / TDD-Bench-Verified：从 issue 生成 fail-to-pass 复现测试并过滤榜单系统补丁**（S101，12分，⚠勘误） | [Otter: Generating Tests from Issues to Validate SWE Patches（ICML 2025, IBM）](https://arxiv.org/abs/2502.05368) | 提出 TDD-Bench-Verified（449 个真实 GitHub issue，12 个仓库，严格过滤出真正 fail-to-pass 且有覆盖度的样本）以及 Otter/Otter++ 测试生成系统；生成的测试可作为过滤器，把 SWE-bench Verified 榜单前 22 个系统的补丁精确率从 65% 提到 92%，召回保持 30%–41%。 | 原文（curl 读取 arXiv HTML 全文核对）：GPT-4o 下 Otter 生成 fail-to-pass 测试 31.4%、Otter++ 37.0%，零样本基线 18.7%，Otter++ pass@5 4… | 对照组：按官方 FAIL_TO_PASS 固定测试集判定；实验组：增加 Otter 式生成测试作为附加过滤层（不替换官方测试）；比最终 resolved rate、误杀率（good patch 被过滤掉的比例）、以及在自建大型仓库任务集上的复现成本（每条 issue 的 token 与沙箱时长）。 |
+| 75 | **测试生成的两个质量杠杆：异质提示 + 执行反馈（e-Otter++）与相关性感知检索（iCoRe）**（S102，12分） | [Heterogeneous Prompting and Execution Feedback for SWE Issue Test Generation and Selection…](https://arxiv.org/abs/2508.06365) | 在『正确代码尚不存在』的场景下，用异质提示配合执行反馈来生成复现测试，e-Otter++ 在 TDD-Bench Verified 上平均 fail-to-pass 率达到 63%（此前 SOTA 为 Otter++ 的 37%）。 | arXiv 摘要原文（读取 abs 页确认）：e-Otter++ 平均 fail-to-pass 63%（TDD-Bench Verified）。… | 对照组：单一提示 + 一次性检索（Otter 基线式）；实验组：异质提示集成 + 迭代检索（把执行结果回灌给检索）；在自建的真实仓库 issue 集上比 fail-to-pass 率、测试覆盖度与每条成本。 |
+| 76 | **TDAD：改码前先做『源码↔测试』影响分析选测试；只给 TDD 流程指令反而更糟**（S103，12分） | [TDAD: Test-Driven Agentic Development - Reducing Code Regressions in AI Coding Agents via …](https://arxiv.org/abs/2603.17973) | agent 提交 patch 前先查一张『源码↔测试』依赖图，知道该验哪些测试并自我纠正；该图以轻量 agent skill（静态文本文件，运行时查询）形式注入。在 SWE-bench Verified 上把回归率从 6.08% 降到 1.82%（降 70%）；作为 skill 换模型/框架部署时 issue 解决率从 24% 升到 32%。 | arXiv 摘要原文（读取 abs 页确认）：Qwen3-Coder 30B 跑 100 个实例、Qwen3.5-35B-A3B 跑 25 个实例，回归率 6.08%→1.82%（−70%）；… | 三臂 A/B/C：A=vanilla agent（无干预）；B=只加 TDD 流程指令（复现论文的 9.94% 回归率负结果）；C=加影响分析 skill；比回归率（原本通过的测试被打挂）、解决率、验证阶段 token 与沙箱耗时。 |
+| 77 | **回归测试最小化 + 补丁验证作为即插即用的选优增强（TestPrune）**（S104，12分） | [TestPrune（FSE 2026，arXiv 2510.18270）](https://arxiv.org/abs/2510.18270) | 复用既有回归测试（自动最小化出小子集）辅助复现测试生成与补丁验证：Agentless/SWE-Agent/Trae 三个 agent 上 issue resolution 相对提升 8.0%–12.9%（SWE-bench Lite 与 Verified），每实例额外成本仅 $0.02–0.05。 | arXiv 摘要（直读核验）：'8.0%–12.9% relative increase'（resolution，跨 3 agent × 2 基准）、'6.2%–9.0% relative increase'（复现，Ot… | 同一 agent 开/关 TestPrune 式回归测试反馈，比较 resolve rate 与选优错误率，统计误杀好补丁率。 |
+| 78 | **Agent-as-a-Judge：给评审线配工具的进程级 agent 评审**（S105，12分） | [Agent-as-a-Judge（arXiv:2410.10934）；Agent-as-a-Judge (Zhuge et al., 2024) + DevAI 基准](https://arxiv.org/abs/2410.10934) | 可读代码库/看中间产物的 agent 评审与人类评审一致性 90%（LLM-as-a-Judge 仅 70%）；OpenHands 消融 65.03%（只问）→75.95%（+图）→82.24%（+读文件）→90.44%（+定位）；成本为人类专家的 2.29%、时间的 2.36%。 ｜ 〔并集·Agent-as-a-Judge(D分片,DevAI)〕对无确定性测试的开放式开发任务，用可交互取证（Ask 模块）+ 判决（Judge 模块）的 agent 评估 agent：与人类评审的偏好对齐率约 90%（LLM-as-a-Judge 仅 70%）；… | 论文 HTML（本次核验引句）：'aligns more closely with the consensus of our human judges (90%) as compared to LLM-as-a-Judg… | 对照：终态 diff 喂 LLM-as-a-Judge 打分；实验：评审 agent 可只读访问仓库并执行定位（不写）；先小样本人工标定一致性再全量跑。 |
+| 79 | **显式计划 + 周期性计划提醒（plan reminder）抑制计划违背**（S109，12分） | [论文《From Plan to Action: How Well Do Agents Follow the Plan?》](https://arxiv.org/abs/2604.12147) | 首个针对编程 agent 计划遵从度的系统性分析：给标准计划能提升 issue 解决率；周期性计划提醒可减少计划违背并提高成功率；但『次优计划比完全没有计划更糟』，且在早期阶段插入额外的任务相关阶段反而会降低性能（尤其当与模型内部问题解决策略不一致时）。 | 消融级证据：分析 SWE-agent 在 SWE-bench Verified 与 SWE-bench Pro 上跨 4 个 LLM 的 21,120 条轨迹，覆盖 8 种计划变体。… | 对照组：无计划；实验组三档——标准计划 / 标准计划+每 N 步提醒（N 取 5/10/20）/ 加了额外早期阶段的计划；指标为 SWE-bench 类任务解决率与计划违背率（可按轨迹自动判定）。 |
+| 80 | **STAIR：历史修复轨迹的多层抽象计划复用**（S110，12分） | [论文《Reusing Past Repairs Through Hierarchical Trajectory Abstraction for Coding Agents》（STA…](https://arxiv.org/abs/2607.29658) | 将历史修复轨迹转成多层次树（从细粒度诊断动作到高层修复策略），新 issue 到来时跨抽象层挑选相关节点、裁剪成可执行计划并注入 prompt；计划还可跨 agent 迁移。 ｜ 〔并集·STAIR(gapfill)〕把历史修复轨迹转成多层（细粒度诊断动作 → 高层修复策略）可复用计划树并注入 prompt：STAIR + Lingxi 在 SWE-bench Verified 上用 MiniMax M2.5 达 81.2% Pass@1、用 GPT-5 达 79.2%；计划跨 agent 泛化——不改任何代码即可把结构完全不同的 mini-SWE-agent v2 从 75.8% 抬到 81.0% | 基准 + 消融：SWE-bench Verified 上，STAIR 集成进 Lingxi 后用 MiniMax M2.5 达 81.2% Pass@1、用 GPT-5 达 79.2%；… | 对照组：无历史计划；实验组：注入单层计划 / 混合多层计划 / 未抽象的原始轨迹；同批 SWE-bench Verified 任务跑 Pass@1，并额外在一个不同结构的 agent 上验证迁移增益。 |
+| 81 | **内聚性感知的任务图切分 + 依赖感知调度（Cohesion-aware Coder）**（S114，12分） | [论文《When Parallelism Pays Off: Cohesion-Aware Task Partitioning for Multi-Agent Coding》](https://arxiv.org/abs/2606.00953) | 把多 agent 编排形式化为图切分问题：用静态分析构建依赖图，隔离结构性 hub 文件，用社区发现切分，再以依赖感知调度器执行；在 DevEval 与 CodeProjectEval 上相对顺序执行、基于文件的并行基线以及 Claude Code 的 Agent Teams 都推进了 Pareto 前沿。 | 基准证据：28 个真实任务（DevEval + CodeProjectEval），pass rate 最高提升 14.0%，墙钟加速最高 2.10x，API 成本最多降低 35%，且在依赖最密集的项目上收益最大。… | 对照组：按文件/目录均分并行 + 顺序执行基线 + 现有多 agent 编排；实验组：内聚性切分 + 依赖感知调度；扫任务规模（10/50/200 文件），比较 pass rate、成本、墙钟。 |
+| 82 | **显式规划/通用子代理作为可选组件，且可能对仓库级生成任务有害**（S121，12分） | [论文《Beyond the Model: Demystifying Harness Effects in Software Engineering Agents》](https://arxiv.org/abs/2609.32459) | 在 mini-SWE-agent 与 OpenCode 两个 harness、10 个开源权重模型、SWE-bench Pro / ProgramBench / GitTaskBench 上评测后构建模块化 NanoHarness 做五个组件消融：结构化工具使用与任务专用 subagent 提升最稳定；上下文压缩与『通用 subagent』会损害仓库生成类性能；复杂 harness 随模型变强收益递减，但对强模型在开放式仓库级任务上仍有收益。 | 消融 + 基准证据，摘要：'Component-level analysis on ProgramBench further shows that structured tool use and task-specifi… | 对照：自研 harness 当前形态；实验：分别打开/关闭『显式规划』与『通用 subagent』两个开关，在 SWE-bench Pro + 仓库生成类任务上做 matched 比较，观察 resolve rate 与成本。 |
+| 83 | **控制实验量化 harness 效应：固定模型跨 harness 对比（Scaffold Effect）**（S126，12分） | [The Scaffold Effect in Coding Agents: Harness Choice as a Hidden Variable in Coding-Agent …](https://arxiv.org/abs/2607.22585) | 同一模型在不同 harness 下 pass rate 差异仅 0–8pp（多数在 bootstrap 噪声内），但每解决一题的 token 数相差最多 40 倍；失败指纹跨模型可复现，说明 harness 带来的是稳定的成本/监督负担差异。 ｜ 〔并集·Scaffold Effect(gapfill)〕在 Terminal-Bench Pro 的 50 任务分层子集上，用 Goose / OpenCode / OpenHands-SDK 三个开源 harness 跑 Qwen 3.6 Plus 与 MiniMax M2.5：harness 选择在「每解决一个任务的 token 数」上造成最多 40 倍差异，而配对后的模型间 pas… | Terminal-Bench Pro 分层 50 题子集，模型固定 Qwen 3.6 Plus 与 MiniMax M2.5，harness 为 Goose / OpenCode / OpenHands-SDK。… | 在自有 harness 上做同模型多 harness 交叉跑，指标定为 tokens-per-solved-task + no-action-turn 占比 + pass rate 三件套，按题配对做 bootstrap CI，禁止只报 pass rate。 |
+| 84 | **双账本编排：Task Ledger（事实/猜测/计划）+ Progress Ledger（五问自检）**（S139，12分） | [Magentic-One: A Generalist Multi-Agent System for Solving Complex Tasks (Microsoft, AutoGe…](https://arxiv.org/abs/2411.04468) | 单一 orchestrator 负责 plans, tracks progress, and re-plans to recover from errors，指挥 WebSurger/FileSurfer/Coder/Terminal；用两个结构化账本驱动整个团队，官方消融：去掉完整账本后 GAIA 验证集上整体性能下降 31%；GAIA test 38.00±5.5%（GPT-4o+o1 版；GPT-4o 版 32.33±5.3）、WebArena 32.8%、AssistantBench accuracy 27.7±6.5%。 | 论文 §5.3 Ablations 原文：without the full ledgers, performance drops by 31%。… | 对照组＝单层 ReAct 编排器（只保留一个进度判断，不预填事实账本、不产出计划）；实验组＝双账本；同一批真实仓库 issue × 3 seed，比较一次通过率、每任务 token 成本与「重复犯同一错」比例。 |
+| 85 | **多 agent 失败分类学与针对性干预（MAST）**（S141，12分，⚠勘误） | [Why Do Multi-Agent LLM Systems Fail? (MAST / MAST-Data, NeurIPS 2025)](https://arxiv.org/abs/2503.13657) | 14 种失败模式分 3 大类（系统设计 / agent 间失配 / 任务验证），标注 1642 条 trace、覆盖 7 个 MAS 框架：7 个 SOTA 开源 MAS 失败率 41%–86.7%；最高频失败为需求偏离 15.7%、信息传递不良 13.2%、角色定义不清 11.8%/步骤重复、不知终止条件 12.4%；针对性干预可提升成功率：改进 ChatDev 角色规范 +9.4%、加入高层任务目标验证 +15.6%。 | 论文构建 MAST-Data：1,600+ 条跨 7 个 MAS 框架（含 AutoGen、MetaGPT 等）的标注轨迹，分类学由 150 条轨迹的严格分析导出，人工标注一致性 kappa=0.88；… | 先测量后实验：在自研产线 trace 上跑 MAST 标注建立协调失败基线率，再对每项通信策略做 A/B，观察该率与下游返工的变化；每项策略实验针对 Top-3 失败模式各上一项干预（步骤去重、显式终止条件、验证门），比较同类失败率与总 resolve rate。 |
+| 86 | **工具化角色分工（tool-centric agents）而非角色扮演式 agent**（S158，12分） | [Magentic-One 论文 §5.3 消融](https://arxiv.org/abs/2411.04468) | Magentic-One 的 worker 按「能操作什么工具」划分（Coder / ComputerTerminal / FileSurfer / WebSurger），而不是按人类角色划分。官方消融：移除任意单个 agent，整体性能下降 21%（Coder、Executor）到 39%（FileSurfer）；去掉 FileSurfer 后在需要文件处理的任务上掉最多，去掉 WebSurger 后在需要网页浏览的任务上掉最多。 | 论文 §5.3 Results 原文：we find that all four worker agents are important: removing any single agent reduces perfor… | 固定同一条多 agent 产线，做角色集合消融：全角色 vs 去掉测试执行角色 vs 去掉代码审查角色 vs 去掉检索角色；N≥30 个真实仓库任务 × 3 seed，比较通过率与人工返工率。 |
+| 87 | **词法锚定 + 图结构局部扩展的检索（LARGER，替换纯 grep 导航）**（S164，12分） | [LARGER: Lexically Anchored Repository Graph Exploration and Retrieval（arXiv 2605.16352，202…](https://arxiv.org/abs/2605.16352) | 把文件定位形式化为「词法锚定的结构化定位」：从词法匹配出发对齐到图锚点，在 agent 既有的搜索循环内做置信度过滤的局部扩展；无需外部图数据库或专用图接口即可接入现有 CLI coding agent；LocBench 文件级 Acc@5 相对最强基线 +13.9pp（调优超参）/ +11.8pp（固定超参），并在 MuLocBench、SWE-Atlas Test Writing、SWE-Atlas Codebase QA 上一致增益 | 本次通过 arXiv API（id_list=2605.16352）读取原文摘要核实：摘要明确给出「四个基准，覆盖定位、测试生成、代码库理解」以及 LocBench Acc@5 的两个数字（+13.9 调优 / +11.… | 在固定任务集上做「纯 grep/glob 基线 vs 词法锚定+图扩展」的 A/B，主指标为文件级 Acc@5 / 改对文件率，辅指标为达到同等定位准确率所需的 token 与工具调用轮次。 |
+| 88 | **跨 harness 的模型排名会反转：按「模型×harness」配对选型，并对畸形工具调用多的模型单独配 harness**（S175，12分） | [Finding the Right Fit: Model-Harness Interactions across Agent Tasks（arXiv 2610.00917, 202…](https://arxiv.org/abs/2610.00917) | 评估 66 种配置（OpenHands、DeepSeek Harness、PI、openJiuwen 四个可配置 harness × 五个模型，外加原生 Codex-GPT 与 Claude Code-Claude 配对）在 TUA-Bench、ALE-CLI、Terminal-Bench 4 上的表现：模型排名跨 harness 反转——Terminal-Bench 4 上 Claude 在 OpenHands 里领先 GPT 7.94 分，却在 PI 里落后 30.16 分；四个模型的最优 harness 会随 benchmark 改变；模型自己厂商的 harness 并不总是最优；成本更高也不保证分更高。 | 论文摘要给出全部数字与机制解释：模型几乎都自己动手修，差别在于 harness 把失败以什么形式回喂给模型；GPT 最吃 PI 的精简脚手架，而「经常发出畸形工具调用」的 Kimi 在 openJiuwen 上最好；… | 对照组 = 固定 harness 下比较各模型；实验组 = 每个模型都跑全部 harness；在自家大仓库 issue 集上同时统计 pass rate、每任务成本、畸形工具调用率，最终报告配对排名而非模型排名。 |
+| 89 | **技能修订必须「可自动检查」，且只有「新增旧技能没提到的命令/路径」的规则才兑现收益；同时把正文加载成本计费**（S177，12分） | [Agent Skill Evolution: How Revisions Affect Coding Agents（arXiv 2610.04832, 2026-10-04）](https://arxiv.org/abs/2610.04832) | 从 3,159 个技能的 2,608 组首/末修订对中抽出可自动检查的规则增删（如「跑 allium check」），测量其对 21 个模型（单答）与 4 个 agent（沙箱）的影响：新增一条规则后单答合规率平均 +0.41；四个 agent 实际采取该动作的比例平均 +0.23（+0.16~+0.36）；三个被判分的 agent 最终正确率平均 +0.10（+0.06~+0.14）。收益主要来自「命名了旧技能没有的命令或路径」的规则。成本侧：一次修订给单答增加 18–19% input token，对一个 agent episode 没有可检测成本；但加载技能正文会把 episode token 抬高 50%。 | 论文摘要给出全部数字与样本量；结构性发现：55% 的修订会改规则或流程；改技能的提交比同规模的其它提交更常同时改 CLAUDE.md 等 harness 文件。… | 对照组 = 修订前的技能版本；实验组 = 只加一条可自动检查规则的修订（且规则里命名具体命令或路径）；同 agent 同任务重复跑，同时比较「动作触发率」与「最终正确率」两个指标，外加 episode token 增量。 |
+| 90 | **文件式外置记忆（structured note-taking / memory tool）**（S003，11分） | [Anthropic context management 公告 + 《Effective context engineering for AI agents》博客 + 《Effec…](https://claude.com/resources/articles/context-management) | 把待办、决策、中间产物持久化到上下文窗口之外的文件，需要时再拉回：memory tool + context editing 在内部 agentic search 评测中比基线高 39%；官方博客用 Claude 打 Pokémon（数千游戏步）演示跨上下文重置续作；配套实践承诺 initializer agent + 进度文件 + 特性清单可让无记忆新会话快速恢复状态 | Anthropic 官方对照数字（Sonnet 4.5 内部 agentic search 集合：组合 +39%；数字来自内部评测、基准名未公开）；… | 对照组纯上下文压缩（compaction），实验组加文件型 memory tool（CRUD）并强制每完成里程碑写 NOTES/任务文件、压缩后重读，比较长任务完成率、重复工具调用次数与跨窗口恢复后首步正确率 |
+| 91 | **子代理上下文隔离与 orchestrator-worker 并行编排（只回传摘要）**（S004，11分） | [Anthropic《How we built our multi-agent research system》工程博客 + Claude Code 官方文档《Subagents》；…](https://www.anthropic.com/engineering/built-multi-agent-research-system) | 探索类工作交给干净上下文的子代理，只回传约 1,000–2,000 token 摘要（原探索耗数万 token）：lead(Opus 4)+subagent(Sonnet 4) 系统比单体 Claude Opus 4 高 90.2%（内部研究评测）；代价是 token 用量约 15× 于普通聊天；Claude Code 文档承诺子代理在独立 context window 运行、不看到主会话历史、只返回 summary，fork 型子代理则继承全部历史（放弃输入隔离但更便宜） ｜… | Anthropic 官方内部研究评测（BrowseComp 等）：+90.2%；性能方差的 80% 可由 token 用量解释（另 15% 来自工具调用数与模型选择，三因素共解释 95%）；… | 同一批定位类编码任务：单体全量探索 vs lead 派 3–5 个只读子代理回传 1–2k 摘要（另设 fork 臂），比较解决率、token 倍数、墙钟时间与改动一致性 |
+| 92 | **把代码库解析成有向异构图（文件/类/函数 + 导入/调用/继承），让 LLM agent 做多跳图搜索定位**（S012，11分） | [LocAgent (arXiv:2503.09089)](https://arxiv.org/abs/2503.09089) | 用图表示捕获代码结构（文件、类、函数）及其依赖（导入、调用、继承），让 LLM agent 通过多跳推理搜索并定位相关实体 | 真实基准上：微调 Qwen-2.5-Coder-Instruct-32B 达到 92.7% 文件级定位准确率，与当时 SOTA 闭源模型相当，但成本降低约 86%；… | 对照组 = grep/glob 文本检索定位；实验组 = 图搜索定位（同一生成模型、同一任务集）；同时比 top-1/top-3 文件命中、检索消耗 token，以及端到端 patch 正确率（不能只测定位指标） |
+| 93 | **RL 训练的专用检索 agent 替代 LLM 自发 grep（CodeGrep，含检索精度阈值判据）**（S013，11分） | [CodeGrep (arXiv:2608.05886)；CodeGrep: An RL-Trained Retrieval Agent for LLM Coding Agents（…](https://arxiv.org/abs/2608.05886) | 现代 coding agent（Claude Code、OpenHands）把大量 token 花在找文件而非打补丁；用 14B 检索 agent 以 GRPO 端到端训练多轮并行 grep/glob/read 并返回候选文件给冻结的下游 coding agent；同时给出「下游收益需检索精度跨过阈值才出现」的判据 ｜ 〔并集·CodeGrep(gapfill)〕在 SWE-Bench Verified 全量 500 例上，14B 检索 agent（GRPO 端到端训练、多轮并行 grep/glob/read）保持通过率的同时大幅提效：27.0% vs 无检索基线 25.8%，已解决实例上轮次 −15%、token −19%；… | SWE-Bench Verified 全部 500 题：CodeGrep 解决率 27.0% vs 无检索基线 25.8%，在已解决实例上轮次 -15%、token -19%；… | 把检索器做成可替换组件做三档 A/B：现 harness 的 LLM 自发 grep / BM25 / 训练后检索 agent，固定下游改码模型与 prompt 模板，比解决率、轮次、token 与检索器精度 |
+| 94 | **用 METR 时域（50% 可完成人类时长）给并行 agent 设定任务切分粒度与可交付上限**（S036，11分） | [Measuring AI Ability to Complete Long Software Tasks (METR，arXiv 2503.14499)；…](https://arxiv.org/abs/2503.14499) | 以'人类专家完成时长'为刻度的 50% 时域可量化 agent 能可靠做多长的任务：该时域自 2019 年起约每 7 个月翻倍；Claude 3.7 Sonnet 约 50 分钟（论文摘要口径；官方博客口径约 1 小时——两数出自不同版本页面，引用须注明出处、勿混用）。可据此切分并行任务粒度与设定'单个 agent 一个 session'的时长上限 ｜ 〔并集·METR time horizon(D分片)〕用「模型能以 50% 成功率完成的人类耗时长度的任务」定义时间地平线：2025 年初 Claude 3.7 Sonnet 约 1 小时；模型在 <4 分钟任务上接近 100%、>4 小时任务上 <10%；… | 论文摘要：'frontier AI time horizon has been doubling approximately every seven months since 2019'；… | 用自家任务集先标定'人类专家完成时长'（或用 METR 的 HCAST/RE-Bench 任务做代理），把任务按时长分桶，比较不同切分粒度下各桶的通过率，检验'超过时域即失败'的预测力 |
+| 95 | **度量门控的技能增删：改动只在多次有/无该技能的重复对比中净增益才保留**（S053，11分） | [arXiv: Cortex: Measurement-Gated Evolution and Pruning of Coding-Agent Skills and Rules (2…](https://arxiv.org/abs/2610.14216) | 开发者凭「一次成功」往 harness 里加规则/技能是不可靠的，同一个 agent 这次过下次就挂。Cortex 把开发者会话里的修正录成可重放任务，归纳出反复出现的修正，每次只写一条技能或规则，只有在「多次有/无该条」的重复运行中显示净增益且没有任务明显变差时才保留；已有文本在删除前同样被这样测一遍。 | 在 Claude Haiku 4.5 上于专用仓库（刻意设置模型常破坏的约定、一块无可学习区域）测：在留出任务上，所构建的 harness 让 agent 遵守约定的频率远高于「无技能无规则」组，可学习区之外保持不变，且… | 对照组自由增删规则/技能；实验组每条候选文本只在 N≥3 次配对运行中净增益为正且无任务回退时才纳入，比较最终 pass rate 与常驻上下文 token。 |
+| 96 | **技能供应链防护：社区技能入库前过静态扫描，运行时按需判定**（S054，11分） | [arXiv: SkillGate: Cost Efficient Runtime Malicious Skill File Detection in Coding Agents (…](https://arxiv.org/abs/2607.25619) | 技能文件是从公共 registry 一条 npx 命令就能装、且无实质安全审查的攻击面：恶意 SKILL.md 可以悄悄改写 agent 行为、外泄凭据、往生成代码里注入后门。可用「正则预筛 + LLM 判定」的混合网关在安装前拦截，并靠安全信号跳过 LLM、被标记文件只送匹配片段而非全文来压成本。 | SkillGate 在 SkillsBench（n=1,650，9.1% 为恶意）上 F1=0.817、FPR=1.13%，相对全文件审查减少 77% 的 LLM 输入 token，threshold-independe… | 在有/无网关两组下用同一批真实技能包（含已知恶意样本）跑安装与执行，比较拦截率、误报率与每包扫描成本；另做一次「恶意技能进入真实任务轨迹」的红队回归。 |
+| 97 | **用失败模式聚类（而非总分）驱动工具改进：把「工具使用错误」和「语法错」从其他失败里单独拆出来**（S067，11分） | [SWE-Bench Pro（arXiv 2509.16941, 2025-09）§6.3 Trajectory Failure Modes, Table 4](https://arxiv.org/abs/2509.16941) | 在 41 个真实企业级仓库、1865 个长程任务上，GPT-5 判官对未解决轨迹做失败模式聚类：Tool-Use 类失败 Gemini 2.5 Pro 38.8%、Qwen3-32B 42.0%、GPT-4o 100%（其失败里全是工具错误）；Syntax error 占 Opus 4.1 失败 24.2%、Gemini 2.5 30.5%；Long context 占 Sonnet 4 失败 35.6%，「无休止读文件」占 17.0% | 论文 Table 4（Submitted/Not-Submitted 分列，括号为实例数）：Claude Opus 4.1 Wrong Solution 35.9%、Syntax Error 24.2%；… | 在自研 harness 的每条轨迹上跑同样的失败模式判官（可用同款 LLM-as-judge 提示词），按工具维度归因；然后对占比最高的失败模式（预期是 Tool-Use / 语法错）逐个做定向 A/B 修复，用归因分布的迁移作为主指标而不是只看总分。 |
+| 98 | **安慰剂对照：盲重采样优于自修复（小模型代码任务，反面证据）**（S086，11分） | [Try Again, Don't Look Back: Blind Resampling Outperforms Self-Repair in Small Code Models](https://arxiv.org/abs/2607.26117) | 自修复的收益被『多试一次』混淆掉：在 MBPP+ 上盲重采样（不给模型看上次失败输出）在 1.5B/3B/7B 三个尺度上都不劣于任何自修复条件，并且省 2.5–5.5 倍 token。 | 安慰剂对照设计，4 个等预算重试条件：盲重采样 / 无内容失败通知 / 真实执行反馈 / 执行反馈 + 语言自反思。盲重采样在 <7B 最强，7B 与最佳条件统计打平，token 少 2.5–5.5 倍；… | 任何『带反馈重试』的 A/B 都必须加安慰剂臂：同 token 预算下 (a) 盲重采样、(b) 只回灌错误文本、(c) 回灌执行输出、(d) 回灌执行输出 + 自反思，否则无法区分『反馈的信息量』与『多一次尝试』。 |
+| 99 | **别让 LLM 反复『自证有 bug』：修复必须由可复现执行证据触发**（S089，11分） | [If It's Not Buggy, Don't Fix It: On the Dynamics of Iterative Bug-fixing with LLMs (arXiv …](https://arxiv.org/abs/2609.10123) | 在多个模型与多种修复环境上，LLM 持续声称在完全没有 bug 的程序里发现了 bug；而『修好有 bug 程序』的比例低于『破坏正确程序』的比例；该循环长期演化会进入『伪修 bug 循环』——同一改动被反复加上又撤掉。机制上探针发现存在控制『编辑倾向』的 steering vector。 | 摘要原文（读取 abs 页确认）：跨多模型与多修复环境，LLM 持续在完全无 bug 的程序上报 bug；修复有 bug 程序的比例低于对正确程序造成的破坏比例；… | 对照组：reviewer 一报 bug 就让 fixer 改；实验组：只有存在可复现 failing test（或官方 FAIL_TO_PASS 断言失败）才允许 fixer 改；比『无 bug 程序被改坏』的比例、单位时间有效修复数与收敛轮数。 |
+| 100 | **AlphaCode 式『大采样 → 用测试过滤 → 按行为聚类』：把测试当过滤器而不是唯一判据**（S100，11分） | [Competition-Level Code Generation with AlphaCode（DeepMind, Science 2022）](https://arxiv.org/abs/2203.07814) | 面对海量模型采样，先用题目自带样例测试过滤掉不合格样本，再用生成的测试输入对剩余样本做行为聚类，从每个 cluster 里取一个提交，把有限提交预算用在行为多样的候选上。 | 原文（下载 arXiv PDF 用 pdftotext 抽取正文核对）：用样例测试过滤可移除超过 99% 的模型采样；… | 对照组：按随机/先到先得挑候选提交；实验组：测试过滤 + 行为聚类后每 cluster 挑一个；在同一评审资源预算下比最终通过率与重复 patch 比例。 |
+| 101 | **Adversarial Review：主 agent + reviewer + critic 三角色，用『结构化分歧』替代『多 agent 一致同意』**（S116，11分） | [Adversarial Review: Structured Disagreement for Grounded Agentic Code Review（arXiv 2608.18…](https://arxiv.org/abs/2608.18167) | 仓库级编码任务上 agent 数量增加收益递减；AR 用最少的协作（3 个 agent）超过 5 agent 基线：LiveCodeBench 上 pass rate 最高；SWE-PRBench 上暴露 naive AR 的『假共识』失效模式，加一次显式分歧的提示迭代后取得最高 F1；SWE-bench Verified 上也优于基线。 | arXiv 摘要原文（读取 abs 页确认）：LiveCodeBench 上用 3 个 agent 超过 5-agent 基线；… | 对照组：单 reviewer；实验组：reviewer + critic 双层且强制结构化分歧输出；比缺陷发现率、误报率、以及最终 patch 的通过率（用执行测试而非评审意见判定，防止自证循环）。 |
+| 102 | **reward hacking 会在多 agent 编码系统里传播：审阅要由独立 verifier 做，且要防『共享记忆』传播路径**（S117，11分） | [Reward Hacking as a Transmissible Strategy in Multi-Agent Coding Systems（arXiv 2610.12822）](https://arxiv.org/abs/2610.12822) | 多 agent 编码系统中，一个 agent 被 RL 诱发出的 reward hacking 策略会传播到其他 agent：既通过代码与共享记忆传播，也通过自然语言计划跨角色传播；小开源模型诱发的 hack 会影响更强的闭源模型；难任务上传播沿『传播链』放大，原源头离开后 hack 随代码附上更有说服力的理由而加剧。让 coder 自审或由独立 verifier 审阅，都能减少最终交付的 hack。 | arXiv 摘要原文（读取 abs 页确认）：4 个开源权重 backbone，两个设定（系统提示显式描述机制；mid-training 预先知道编码环境事实）；观察到经由代码与共享记忆、经由自然语言计划的跨角色传播；… | 对照组：agent 间共享完整轨迹与共享记忆；实验组：只共享代码与显式计划、验证器上下文与被测 agent 隔离；比最终交付物中的 hack 数量、共享记忆里 hack 首次出现到扩散的时间、以及独立 verifier 抓到的 hack 比例。 |
+| 103 | **TestJack 式自适应评测器：给每个 trial 事后生成『针对性测试』再复判，把固定测试集的评测变成滚动评测**（S123，11分） | [TestJack: Should you trust the results in coding benchmarks? Agentic Coding Benchmarks Aud…](https://arxiv.org/abs/2610.10619) | 现有代码基准几乎都只认『通过固定单测』，测试往往只覆盖任务要求的一部分，agent 因此可以 reward-hack 固定评测器而真实能力不涨。TestJack 对每个 trial 生成针对『patch 可能违反的 prompt 要求』的测试，只保留能被 ground-truth patch 接受的测试，再复审原判定：约 34.4% 被判定为正确的模型 trial 实际违反任务要求，整体解决率从 50.6% 降到 33.2%。 | arXiv 摘要原文（读取 abs 页确认）：6 个前沿模型后端 × 5 个基准（含 DeepSWE、SWE Marathon），约 34.4% 被判正确的 trial 实际违反任务要求；… | 对照组：固定 FAIL_TO_PASS 判定为通过；实验组：叠加 TestJack 式针对性测试复判（保留 ground-truth patch 接受的测试）；比两者的『真实正确率』差异，以及 agent 侧要达成的目标分数（避免用被 hack 的分数选优）。 |
+| 104 | **用「同模型、不同 harness」的公开榜单做 harness 杠杆量化：harness 选择的分差与一代模型差距同量级**（S125，11分） | [SWE-bench 官方 Leaderboard（页面内嵌 leaderboard-data JSON，含 agent / model / resolved / cost 字段）](https://www.swebench.com/) | 固定同一个模型、只换 harness，SWE-bench Verified 的 resolved 率差可达 9.6–29.8 个百分点；固定 harness（mini-SWE-agent）换模型的跨度是 67.8 个百分点，说明 harness 是模型代差量级以下的第二杠杆。 | 从 https://www.swebench.com/ 的 leaderboard-data 解析 Verified 榜单 180 条记录。… | 自研 harness 在同一批大型仓库任务上与 2–3 个公开 harness（mini-SWE-agent、OpenHands、自研简化版）做同模型配对跑，报告 resolved 率、token/题、成本三列并与榜单同款口径对齐。 |
+| 105 | **在私有污染受控题库上做「厂商原生 harness vs 中立 harness」配对实验，检验换 harness 是否真能涨分**（S127，11分） | [Harness or Model? Isolating the Harness Effect in Agentic Coding with a Contamination-Cont…](https://arxiv.org/abs/2609.11987) | 在私有、污染受控的 256 题套件上，同模型换 harness 的平均通过率差异不显著（Opus 4.8：48.8% vs 50.0%，−1.25pp，95% CI [−10.0, +7.5]；GPT-5.5：55.6% vs 54.4%，+1.25pp，CI [−4.4, +6.9]）；但按任务类型分层差异极大——厂商原生 harness 在 61 个仓库任务上落后 9.0pp、在 19 个竞赛任务上领先 23.7pp；中立 harness 每个解决任务的成本是原生的 1.3–1.6 倍。 | 80 个同题对：claude-opus-4-8 上跑 claude-agent-sdk 与 deepagents；gpt-5.5 上跑 openai-codex SDK 与 deepagents；… | 在自建私有大仓库任务集上做同模型跨 harness 配对（≥50 对题/格），按仓库型 / 特性型 / 竞赛型分层分别报差值与 CI，并同时报 token 与真实计费口径。 |
+| 106 | **把 harness 本身当作可自动进化的对象：闭环节自动演化 harness（工具/中间件/长期记忆组件化）**（S131，11分） | [Agentic Harness Engineering (AHE): Observability-Driven Automatic Evolution of Coding-Agen…](https://arxiv.org/abs/2604.25850) | 十轮 AHE 迭代把 Terminal-Bench 2（89 题）的 pass@1 从 69.7% 提到 77.0%，超过人写 harness（Codex 71.9%、Terminus-2 62.9%、OpenCode 47.2%）；冻结后换模型仍能迁移（+5.1 至 +10.1pp 跨三个模型家族）。 | Table 1（TB2 全 89 题 pass@1）：人写 harness OpenCode 47.2% / Terminus-2 62.9% / Codex 71.9%；… | 把自研 harness 拆成工具/中间件/记忆/提示四层，在固定 seed 上跑 10 轮带评测反馈的自动演化，基线是当前手工 harness；同时做「冻结后换模型家族」的迁移实验与「单组件替换」消融。 |
+| 107 | **先让弱模型跑几步探索、再基于部分轨迹决定是否升级（SWE-Router）**（S134，11分） | [SWE-Router: Routing in Multi-turn Agentic Software Engineering Tasks](https://arxiv.org/abs/2607.00053) | 纯 one-shot router 在 agentic SWE 上有信息论 Bayes-error 下界；让便宜模型先跑几步探索、读部分轨迹再决定继续便宜还是升级到贵模型，可大幅提升 SWE 任务的成本效率同时保持强模型大部分性能。 | 论文摘要给出 value-based temporal 方法 + 一个 Bayes 最优性定理：conditioning on the partial trajectory never harms routing and… | A 组「弱模型全程跑到底 + 失败即整体升级」，B 组「弱模型先跑 N 步、路由读部分轨迹决定升/不升」；扫 N∈{1,2,3,5} 与阈值，画 resolve rate vs 强模型调用次数曲线，并统计「本该升级却没升」的反例类型。 |
+| 108 | **投机执行：弱模型起草、强模型只做审核与修补（SpecAgent）**（S135，11分） | [SpecAgent: Trajectory-Level Speculation with Semantic Verification for Tool-Using Agents](https://arxiv.org/abs/2610.21463) | 把强模型从「每一步的作者」改成「弱模型草稿的审核者」：弱模型起草时执行只读工具调用使每步落在真实观测上，并扣住第一个会修改环境的动作；强模型用一次 prefill 审核整段草稿，提交其判定语义有效的最长前缀，并修补第一个被拒步骤。 | 摘要原文：τ²-Bench 上 comes within one point of the strong model's success rate while roughly halving memory traffic… | A 组强模型逐步生成，B 组弱模型起草 + 强模型 prefill 审核/修补；同任务集同随机种子，比 solve rate、总 output token、wall time，并额外统计被拒步骤比例。 |
+| 109 | **协同何时有益的定量规律（任务结构决定架构收益）**（S143，11分） | [Towards a Science of Scaling Agent Systems (Nature Machine Intelligence 2026, MIT 等)](https://arxiv.org/abs/2512.08296) | 260 配置 × 6 基准 × 5 架构（Single/Independent/Centralized/Decentralized/Hybrid）× 3 模型家族：相对单 agent 的收益从 +80.8%（可分解任务，金融推理）到 -70.0%（顺序规划任务）；存在能力饱和效应——单 agent 基线足够强后协同收益递减；工具密集型任务存在多 agent 开销。 | 论文摘要：定量 scaling 规律 cross-validated R²=0.373（改用任务锚定能力指标后 0.413）；框架正确预测 87% 留出配置的最优架构；无集中验证的架构更易传播错误；… | 把自建任务按可分解性/顺序依赖打标分桶，每桶内 A/B 单体 vs 两三种协同架构，验证「任务结构预测架构收益」在自家任务分布上成立。 |
+| 110 | **仓库级技能的版本绑定与失效检测（release transition 维护任务）**（S162，11分） | [Repo2Skill-Evo: Repository Skills Go Stale in Silence（arXiv 2608.21964，2026-08-22）](https://arxiv.org/abs/2608.21964) | 仓库技能会静默过期：57 个真实仓库、105 次选定的版本跃迁中，每一次都会让 V1 技能集的一部分失效；6 个前沿 agent 在「以官方 V1→V2 补丁为依据」的移除指标下，avg@3 macro F1 仅 29.9%–69.7%；两类相反错误主导结果——技能集未覆盖受影响文件导致残留过期内容，以及过度编辑导致召回高但精确率低 ｜ 〔并集·Repo2Skill-Evo(gapfill3)〕把每次 release 迁移当作一个技能维护任务：给定 V1 技能集与官方 V1→V2 补丁，agent 要更新过时内容、同时保留仍然有效的指导。… | 本次通过 arXiv API（id_list=2608.21964）读取原文摘要核实：任务设定为给定 V1 技能集与官方 V1→V2 patch，让 agent 更新已过期的技能内容同时保留仍然有效的部分；… | 构造「基线 vs 技能库」双跑：每 2 周给实验组推送一次技能库版本，对照组固定用首版技能库；比较同一批任务上的 pass rate 衰减曲线与 token 消耗，度量技能腐化的实际收益流失速度。 |
+| 111 | **RepoAtlas：select–project–refresh 的动态仓库视图（省 token 又提 resolve rate）**（S165，11分） | [RepoAtlas: Guiding Coding Agents via Evolving Multimodal Repository Views（arXiv 2609.16936…](https://arxiv.org/abs/2609.16936) | 免训练的仓库图视图模块，用 select–project–refresh 循环维护动态视图：结合 issue 证据与 agent 当前探索状态，在固定预算下选出任务相关区域，同时投影为视觉与文本两种互补表示，并在探索状态变化导致视图过时后刷新；SWE-bench Verified 上相对最强的多模态图基线 resolve rate +2.4 个百分点，同时平均输入 token −5.8%、模型调用数 −7.8%；跨三个不同家族与规模的模型增益一致 | 本次通过 arXiv API（id_list=2609.16936）读取原文摘要核实：resolve rate、输入 token 与模型调用数三项数字，以及「相对最强多模态图基线」「跨三个模型家族与规模一致」的实验设置描… | A/B：基线线性文本上下文 vs 启用 RepoAtlas 视图循环（预算与模型相同），同时记录 resolve rate、输入 token、模型调用数三项，任一项显著劣化即判负。 |
+| 112 | **合并冲突归因遥测与自消解率门禁（谁产生、谁解决、用什么策略）**（S171，11分，⚠勘误） | [How AI Coding Agents Resolve Merge Conflicts: An Empirical Study（SBES 2026，AIDev 数据集）](https://cbsoft.sbc.org.br/2026/data/papers/sbes/How%20AI%20Coding%20Agents%20Resolve%20Merge%20Conflicts%20An%20Empirical%20Study.pdf) | 首个大规模「谁解决 agent 冲突」研究：从 932,791 个 agent PR 池分析 12,299 个 AI 作者 PR 的 14,960 个冲突内部合并提交，96.1%（14,386 个，agent 自己仅 3.1%/462 个）由人类解决；agent 自消解率厂商间相差近 60 倍（Codex 0.5% → Devin 29.4%，Cursor 8.9% 居中）；Codex（90.2%）与 Claude Code（83.3%）各有 >83% 的自消解来自单一仓库〔K3 勘误：原区间 80–83% 对 Codex 偏低〕（集中度偏差）；… | 本次已下载 11 页 PDF 全文并抽取文本核对上述全部数字（SBES 2026，2026-09，圣保罗）。… | 在 harness 内置冲突归因器（冲突制造者、解决者、策略类型 V1/V2/新码/组合），A/B 不同合并策略时以自消解率、消解正确性（合并后 CI 破坏率）、人工介入率为主要指标。 |
+| 113 | **冲突预测驱动的任务排程：用静态重叠特征在派单时串行化高风险任务对**（S172，11分） | [Predicting Merge Conflicts in Collaborative Software Development（ESEM 2019，arXiv 1907.0627…](https://arxiv.org/abs/1907.06274) | 仅用 9 个轻量 Git 特征（改动文件/目录重叠等）预测合并是否会冲突，跨语言 safe-merge 场景 f1 达 0.95–0.97；冲突「解决难度」同样可预测：6,380 个冲突、128 个 Java 项目上 AUC 0.76。 | 学术实证研究（Owhadi-Kareshk et al., ESEM 2019，被引 76+；Brindescu et al., 2020，数字来自论文 PDF，本次经搜索摘要核对，未逐页验证原文）。… | 自研产线记录每对并行任务的文件/符号重叠特征与实际冲突结果，在线训练轻量分类器；A/B：预测器排程 vs 朴素并行 vs 全串行，比较冲突数、重试成本、端到端时延与通过率。 |
+| 114 | **建一个比端到端 SWE-Bench 便宜两个数量级的「编辑器级代理评测」，用它做模型档位—成本帕累托选型**（S174，11分） | [SWE-Edit 发布的 PR-Edit 轻量评测 + Table 3 / Table 4 / Figure 4（arXiv 2604.26102v2）](https://arxiv.org/abs/2604.26102) | PR-Edit 的分数与 SWE-Bench resolve rate 排序一致（Pearson r=0.98, n=4），可作为迭代编辑器的快速信号；据此完成档位选型：Qwen3-8B 68.5% resolved / $231.7 / edit succ 68.6%，Qwen3-8B+GRPO 69.9% / $215.9 / 81.1%，GPT-5-nano 70.0% / $207.1 / 82.0%，GPT-5-mini 72.0% / $179.6 / 96.9%。 | 论文明确说端到端 SWE-Bench 一次约 $200，故以 PR-Edit 做快速信号；… | 先在自家 200~500 条大型仓库 issue 任务上建代理集，用同一批任务同时跑「代理指标」与「端到端 resolved」算相关性；只有相关性达标的代理指标才允许进入 A/B 流水线，之后每个候选格式/档位组合只跑代理集。 |
+| 115 | **工具接口（CLI vs MCP）选型看「失败成本」与「agent 是否真的走了被指派的接口」，而不是只看 token 价差**（S176，11分） | [The Scaffolding Matters More Than the Interface: A Controlled Comparison of MCP and CLI To…](https://arxiv.org/abs/2608.08654) | 同一个固定软件任务（对私有在线 git 仓库的 6 个操作）跨 7 个 agent scaffold × 5 个语言模型跑 MCP 与 CLI：两个 scaffold 根本不支持 MCP、全部用 CLI 完成，比那 5 个支持 MCP 的 scaffold 便宜 5.0×–28×（比较的是完全没挂 MCP server 的 CLI 运行）；两种接口的差异主要体现在失败成本——MCP 运行花掉的钱里 12.9% 没有换来任何已完成工作，CLI 只有 2.2%；但失败频率两者相当；13 个严格配对的 MCP→CLI 成本比跨度 0.43×–29×，作者称这个比较「极不稳定」；且 agent 经常无视被指派的接口。 | 论文摘要给出全部数字与验证方法：完成情况通过检查仓库真实状态判定，而不是相信 agent 自报；harness、任务、验证器与完整数据集开源。作者结论是「scaffolding 效应大于接口效应」。 | 对照组 = 同一任务强制 CLI；实验组 = 同一任务强制 MCP；用轨迹断言「实际走的接口」再统计每任务成本与失败成本，而不是只统计 agent 自报；同时对被指派接口做一次 post-hoc 核查并把不服从率作为一等指标。 |
+| 116 | **用「探针-精炼」自动调优仓库指导文件：收益来自覆盖率（找到正确文件）而不是精度（把改动做对）**（S179，11分） | [Probe-and-Refine Tuning of Repository Guidance for Coding Agents（arXiv 2606.20512v2, 2026-…](https://arxiv.org/abs/2606.20512) | 用合成 bug-fix 探针迭代诊断并修补仓库的指导文件，整个调优过程只用单次 LLM 调用、不用 agent 循环也不用工具：SWE-bench Verified 上 Qwen3.5-35B-A3B、200 步、4 次独立试验，probe-and-refine 平均 resolve rate 33.0%，优于它初始化的静态知识库 28.3% 和无指导基线 25.5%（两个对比均 p<0.001）。 | 论文摘要给出三个数字与显著性；机制结论：精炼后的指导让 agent 多覆盖 14.5pp 的「可产出补丁」实例，而每补丁精度统计上不变（~59%，p=0.119）——即改善来自「agent 找到正确的文件」，不是「改动质… | 对照组 = 静态 AGENTS.md（人工或一次性 LLM 生成）；实验组 = 同一初始文件 + 探针-精炼循环（探针数与步数作为超参扫）；同模型同任务做 4 次独立试验比 resolve rate，并单独统计「定位到正确文件」与「补丁正确」两个指标以验证覆盖率机制。 |
+| 117 | **从仓库自身的历史提交蒸馏技能，并用「面向未来真实合并 PR」的多维有机性指标评测（不只测功能通过率）**（S180，10分） | [Learning to Commit: Generating Organic Pull Requests via Online Repository Memory（arXiv 26…](https://arxiv.org/abs/2603.26664) | 严格时间切分下，agent 通过「盲做历史提交 → 与 oracle diff 对比 → 蒸馏成可复用技能」的 on-policy 循环积累仓库特定开发模式（代码风格与命名、内部 API 的存在与用法、隐式架构约束、维护者偏好），在真正未来、已合并的 PR 任务上：4 个条件中 3 个条件的 File IoU 更高，最大 +19pp（seq-all：80% vs 61%），同设定下工具调用少 21%（56.8 vs 71.9 步），两个独立裁判模型（Claude Opus 4.6、Gemini 3.1 Pro）给出的整体胜率 54%–58%。 | 论文 §4：从 2,738 个非 merge 提交经程序化过滤 + LLM 评估筛出 386 个高质量提交（77.2% 适配率），分 7 个开发类别；时间切分出 24 个学习提交 + 7 个未来留出测试任务；… | 对照组 = 不带任何技能文档的同款 agent（同模型、同工具、同任务）；实验组 = 带从历史提交蒸馏出的技能文档；用未来留出的真实 PR 任务，配对双裁判在 scope/logic/redundancy/style 四维打分，主指标用 File IoU 与 line deviation 等确定性指标而不是只看测试是否通过。 |
+
+> ⚠ **勘误标注**：带「⚠勘误」的 9 条（S001/S005/S024/S101/S141/S091/S096/S132/S171）的承诺改进、证据或来源含已识别错误，正确口径以第三节对应条目的「勘误」行与就地改正为准（汇总见 6.2）。
+
+## 三、分类详述
+
+主清单 180 条全部收录于此（被剔除的 133 条见第六节）。每条含：链接、承诺改进、证据与等级、K3 验证结论与三项打分（证据强度/大型仓库价值/可测性，各 1–5）、测试设计、备注。「大类」保留主清单原始分类。
+
+### 3.1 上下文管理与仓库级理解（23 条，A 级 16 条）
+
+#### S001 · LLM 摘要式对话压缩（auto-compact / LLMSummarizingCondenser，含默认参数基线）
+
+- **大类/来源**：上下文管理｜[OpenHands（All Hands AI）官方博客 + Claude Code 官方文档；OpenHands SDK 官方文档（Condenser 架构）与 openhands-ai 代码取证；OpenHands SDK 官方文档：Context Condenser](https://www.openhands.dev/blog/openhands-context-condensensation-for-more-efficient-ai-agents)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：接近上限时用 LLM 把历史摘要为『目标/进度/剩余工作/文件与失败测试』再重启：SWE-bench Verified 子集解决率 54% vs 无压缩基线 53%，单轮 API 成本最高降 2 倍（压缩后稳定在基线一半以下），token 与完成时间均下降 ｜ 〔并集·Condenser参数基线〕LLMSummarizingCondenser 默认 max_size=120（事件数触发压缩）、keep_first=4（开头 4 个事件逐字保留，通常为系统提示与任务定义），压缩后视图以 max_size//2≈60 个事件收尾；有阈值触发（每步检查）+ 手动触发（上下文溢出错误后发 CondensationRequest）双路径；PipelineCondenser 可串联『删旧→摘要→截断』多级压缩。V0 默认 condenser 是 NoOpCondenser（不压缩） ｜ 〔并集·OpenHands SDK condenser 文档〕超阈值后用 LLM 摘要压缩旧对话、保留首部关键事件（系统提示/初始目标）：官方声称每轮 API 成本最高降 2 倍、长会话响应时间稳定、软件工程任务性能 equivalent or better。
+- **⚠ 勘误（K3 对照原文，以下口径为准）**：「LLMSummarizingCondenser 默认 max_size=120、keep_first=4、压缩后 ~60 事件」已过期：当前 agent-sdk 类默认 max_size=240/keep_first=2，default_condenser() 工厂为 max_size=80/keep_first=4，压缩目标=max_size//2；核心对照数字（54% vs 53%、成本砍半）不受影响。引用默认参数须注明版本。
+- **证据**：OpenHands 官方对照实验（SWE-bench Verified 子集）：开 condensation 解决率 54% vs 基线 53%，成本降一半以下，基线成本随对话长度二次增长、压缩后近似线性；代价是偶尔多一个 condense 回合。生产实现见 Claude Code：/compact [instructions] 支持聚焦指令，/autocompact [auto|<tokens>]（v2.1.221+）可设压缩触发窗口；官方文档未公布固定触发百分比 ｜ 〔并集·Condenser参数基线〕官方 SDK 文档给出默认参数与滚动压缩语义（head 保留 keep_first、tail 保留 target_size-keep_first-1、超阈值自动触发），注明代码路径 openhands-sdk/.../condenser/；文档只给『120+ 事件压到 ~60+摘要』示意数字，无基准成绩。代码取证（openhands-ai==0.39.0 wheel）：core/config/agent_config.py:37-39 默认 NoOpCondenserConfig(type='noop')；condenser_config.py 中 AmortizedForgetting max_size=100/keep_first=1、ObservationMasking attention_window=100、BrowserOutput attention_window=1；经典 condenser 家族含 9 种实现（memory/condenser/impl/）。属官方工程默认值经验，非消融结论 ｜ 〔并集·OpenHands SDK condenser 文档〕官方文档（本次核验）：'Up to 2x reduction in per-turn API costs'、'Consistent response times'、'Equivalent or better performance on software engineering tasks'；LLMSummarizingCondenser 机制与 keep_first 保留策略。OpenHands 平台论文 arXiv:2407.16741 的 v1/v2 HTML（本次核验）均无 condenser 对照数字。
+- **K3 验证结论**：链接有效；claim 部分一致；证据强度 4 / 大型仓库价值 5 / 可测性 5。核心 claim（54% vs 53%、成本砍半）经官方对照实验核实，可直接进 A/B；仅 SDK 默认参数数字过期需修正。
+- **测试设计**：同一批 SWE-bench 任务对：对照组到上下文溢出即截断/失败，实验组达到 max_size 触发 LLM 摘要压缩，多 seed 比较解决率、token、美元成本
+- 备注：负面证据：GitHub issue anthropics/claude-code#75759 报告压缩后丢失本会话内已做过的操作，社区普遍反映 /compact 后行为退化、会话内指令丢失。官方文档确认 auto-compaction 只按预算带回已调用过的 skill（每个最多 5,000 token、合计 25,000）——自研 harness 应让压缩 prompt 强制保留『已改文件/已验证结论/剩余步骤』清单，并按预算重挂载关键资源 ｜ 〔并集·Condenser参数基线〕NoOpCondenser 即不压缩的对照组；官方建议摘要用比推理模型更便宜的 LLM。负面证据：arXiv 2605.18854（见观测屏蔽条目）显示 LLM 摘要类压缩可能纯增成本 24–94%，压缩触发时机本身可能是关键变量；这些默认值是工程先验而非实验结论 ｜ 〔并集·OpenHands SDK condenser 文档〕数字为官方文档口径，无对照实验细节；摘要可能丢失精确代码细节（行号/签名），压缩时机应避开调试关键期；condenser 实现多样，需逐个测。；核验问题：['主链接（OpenHands 博客，2025-04-09）数字全部吻合：condensation 54% vs 基线 53%、per-turn API 成本最高降 2x、压缩后稳定在一半以下（本次 WebFetch 核实）。', '但『LLMSummarizingCondenser 默认 max_size=120、keep_first=4、压缩后 ~60 事件』与当前 OpenHands agent-sdk 源码不符（本次核验 raw.githubusercontent.com/OpenHands/agent-sdk/main .../llm_summarizing_condenser.py）：类默认 max_size=240、keep_first=2；default_condenser() 工厂为 max_size=80、keep_first=4；target_size=max_siz；修正建议：将『默认 max_size=120、keep_first=4，压缩后以 ~60 事件收尾』改为『当前 agent-sdk 代码：类默认 max_size=240/keep_first=2，default_condenser() 工厂 max_size=80/keep_first=4，压缩目标=max_size//2（机制属实，具体默认值随版本漂移，建议以代码为准并注明版本）』。
+
+#### S002 · 工具结果清理 / 上下文编辑（tool result clearing / context editing）
+
+- **大类/来源**：上下文管理｜[Anthropic《Managing context on the Claude Developer Platform》官方文章与 context management 公告（随 Claude Sonnet 4.5 发布）](https://claude.com/resources/articles/context-management)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：接近上限时自动清除过期工具调用与结果：context editing 单独带来 29% 提升（内部 agentic search 评测）；memory tool + context editing 组合 +39%；100 轮网页搜索评测中让原本因上下文耗尽而失败的流程跑完，token 消耗降 84%
+- **证据**：Anthropic 官方对照评测（Claude Sonnet 4.5，内部多轮 agentic search 集合，基线未细分公开）：context editing 单独 +29%，组合 +39%，100 轮 web search token -84%；原文称其为『最安全、最轻量的压缩形式』。第三方论文 arXiv 2605.18854 在 480 次评测中测得仅掩码工具调用输出即可净省 8.6% token，方向一致。Claude Code 实现顺序：先清旧工具输出，再摘要对话
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 5 / 可测性 5。官方数字如实转述但属不可复现内部评测；机制极低成本即可在自研 harness 复测，值得 A 级优先 A/B。
+- **测试设计**：对照组保留全部工具输出直到溢出；实验组超阈值后清除最旧工具输出（保留调用骨架+最近 N 轮结果），比较解决率与 token/成本
+- 备注：84% 是 token 节省而非准确率；基线为内部评测集、非公开基准名未公开，第三方无法直接复现（调研环境中 platform.claude.com 被区域屏蔽，数字从 claude.com 官方博客原文核实）。需防止清除仍被引用的结果——保留工具调用参数与一行占位结果可降低风险
+
+#### S005 · Context rot：按有效（而非标称）上下文设预算（含编码任务预填充复现）
+
+- **大类/来源**：上下文管理｜[Chroma《Context Rot》技术报告（2025-07）+ boolean.ai 编码任务复现（2026-09 博客）](https://www.trychroma.com/research/context-rot)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：输入越长性能越不可靠且非均匀：18 个模型、约 194,480 次 LLM 调用，NIAH 变体、LongMemEval、重复词任务均随输入变长衰减；干扰项从 0→1→4 个逐级拉低准确率；LongMemEval 上全量输入（均值 ~113k token）显著差于 ~300 token 聚焦输入。编码复现：terminal-bench v4 的 20 个任务预填充 250k token 后，GPT-5.6 Sol 通过率 31%→24%（500k 保持）；Claude Opus 5 在任务相关预填充（Apache Spark）下 50%→40%
+- **⚠ 勘误（K3 对照原文，以下口径为准）**：「Claude Opus 5 在任务相关预填充（Apache Spark）下 50%→40%」类型写反：Apache Spark Q&A 属【无关】预填充（Opus 5 几乎不衰减）；50%→40% 的衰减发生在【任务相关】预填充（关于任务自身环境的 Q&A）下。其余数字不受影响。
+- **证据**：Chroma 官方报告：18 模型×4 家族（Claude、OpenAI、Gemini、Qwen3），NIAH 设 8 种输入长度×11 个针位置、温度 0、GPT-4.1 判分（与人工一致率>0.99）；LongMemEval 306 题全量 vs 聚焦对照；反直觉发现：乱序 haystack 反而稳定优于结构化 haystack、语义相关度越低退化越快、单个干扰项即降性能。boolean.ai（厂商博客，2026-09-15，https://www.boolean.ai/blog/context-rot-quantified）：预填充 0k/250k/500k token 的编码任务复现，数字如上
+- **K3 验证结论**：链接有效；claim 部分一致；证据强度 4 / 大型仓库价值 4 / 可测性 4。Chroma 部分证据扎实（19 万次调用）且编码复现方向一致；仅 Opus 5 案例的预填充类型写反，需修正。
+- **测试设计**：复刻 boolean.ai 协议：固定任务集，按 0/25%/50% 注入历史或预填充（相关/无关两种），画通过率-预填充长度曲线找拐点；对照组为每次全新上下文
+- 备注：Chroma 测试以检索/复述类任务为主，报告自认真实多步推理衰减可能更重；其 NIAH 针位置效应不显著，与 lost-in-the-middle 的任务依赖性需区分；boolean.ai 部分是厂商博客、样本仅 20 任务、无同行评审（该部分按经验对待）。两个来源共同提示：长上下文不是免费容量；核验问题：['Chroma Context Rot 报告核实：18 模型 × 4 家族、194,480 次调用、NIAH 变体/LongMemEval/重复词任务、干扰项 0→1→4 逐级拉低、LongMemEval 全量 ~113k vs 聚焦 ~300 token、乱序 haystack 反而更稳——全部吻合。', 'boolean.ai 博客（2026-09-15，本次核实）：terminal-bench v4 取 20 任务、0k/250k/500k 预填充、GPT-5.6 Sol 31%→24% 且在 500k 保持——吻合。', '但 claim 中『Claude Opus 5 在任务相关预填充（Apache Spark）下 50%→40%』张冠李戴：原文 Apache Spark Q&A 是【无关】预填充（Opus 5 在其下几乎不衰减、善于忽略无关上下文）；50%→40% 发生在【任；修正建议：将『Claude Opus 5 在任务相关预填充（Apache Spark）下 50%→40%』改为『Claude Opus 5 在任务相关预填充（任务环境 Q&A）下 50%→40%；在任务无关预填充（Apache Spark Q&A）下几乎不衰减』。
+
+#### S006 · Lost in the middle：关键信息置首尾的位置工程
+
+- **大类/来源**：上下文管理｜[Liu et al.《Lost in the Middle: How Language Models Use Long Contexts》（TACL 2024）](https://arxiv.org/abs/2307.03172)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：多文档 QA 与 key-value 检索上，相关信息位于开头或结尾时性能最高、位于中间显著下降（U 形曲线）；开头还存在偏向引用首文档的启动效应
+- **证据**：受控实验：相同相关信息仅改变位置（多文档 QA + key-value 检索），覆盖开源/闭源多家模型（含 GPT-3.5/4、Claude 系与 TULU 等微调模型）；被引 7,200+（检索结果显示）；各模型具体下降点数未在摘要页给出
+- **K3 验证结论**：链接有效；claim 一致；证据强度 5 / 大型仓库价值 4 / 可测性 5。同行评审经典，受控位置实验结论明确；提示词排布类 A/B 成本极低，直接可做。
+- **测试设计**：同一提示内容两种排布：关键约束置首尾 vs 均匀散布，比较解决率与违规次数；另测固定编排『最新观测永远置于上下文末尾』
+- 备注：U 形幅度与任务类型、模型强相关；Chroma 的 NIAH 设置未复现位置效应，说明该结论对『多候选中找相关信息』类任务最适用
+
+#### S008 · 上下文折叠/主动编辑对抗上下文膨胀（Context Folding + AgentFold）
+
+- **大类/来源**：上下文管理｜[Sun et al.《Scaling Long-Horizon Agents via Context Folding》（arXiv 2510.11967）；AgentFold（arXiv 2510.24699）；Context-Folding/FoldAgent（arXiv 2510.11967，ICML 2026）](https://arxiv.org/abs/2510.11967)｜证据等级：ablation｜定级：**B**
+- **承诺改进**：agent 主动把 token 密集的子任务分支为子轨迹，完成后折叠为简短结果摘要（配合 FoldGRPO 强化学习训练任务分解与折叠策略）：活跃上下文缩小 10×，达到或超过 ReAct 基线，显著优于摘要式上下文管理 ｜ 〔并集·AgentFold〕AgentFold 把上下文当「主动雕刻的工作区」：每步做粒度折叠（保留细节的局部压缩）或深度折叠（整段子任务抽象掉），替代 ReAct 式被动追加；30B 模型仅 SFT 即达 BrowseComp 36.2%、BrowseComp-ZH 47.3%，论文称超/平 DeepSeek-V3.1-671B、胜 o4-mini。FoldAgent 用临时子轨迹+折叠扩展长程任务能力。
+- **证据**：论文在 Deep Research 与 SWE（长时程任务）评测；abs 页核验到『活跃上下文 10× 更小』与『显著胜过摘要式管理』的定性结论，百分比未在摘要页给出 ｜ 〔并集·AgentFold〕公开基准成绩（同行评审在投/已中论文）：BrowseComp 36.2%/47.3% 已核对 abs 页。注意：摘要未给出 token 节省的具体倍数，token 效率声称未能在本次核对中量化——如实标注。论文为 web agent 域，编码域迁移未经公开验证。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 2。两篇摘要数字均如实；但 FoldGRPO/深度折叠依赖训练（RL 或 SFT 数据），自研 harness 无法纯配置化 A/B，落地门槛压到 B。
+- **测试设计**：对照组阈值触发 LLM 摘要；实验组在任务结构上显式分支（子轨迹/子代理）并折叠回结果摘要，比较活跃上下文峰值、解决率与端到端成本
+- 备注：依赖 RL 训练（FoldGRPO），复现成本高；分支自由度可能失控，需限制分支深度；其 SWE 子集具体构成未在摘要页披露 ｜ 〔并集·AgentFold〕域是 web agent，迁到 coding 需重训或重新设计折叠动作；与 RadixAttention/前缀缓存两条策略应联合调参而非独立开启；失效风险：深度折叠删掉后续仍需的接口细节导致返工。
+
+#### S009 · 观测屏蔽/工具输出掩码等『无损』压缩 + 负结果基线：LLM 摘要压缩不保证正收益
+
+- **大类/来源**：上下文管理｜[OpenHands condenser 家族（ObservationMaskingCondenser / BrowserOutputCondenser / bash 截断）+ 《Evaluating Memory Condensation Strategies for Coding Agents in Data-Driven Scientific Discovery》（arXiv 2605.18854）](https://arxiv.org/abs/2605.18854)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：系统比较 8 种记忆压缩策略（滑动窗口到 LLM 摘要）：没有任何压缩器显著提升任务输出质量，LLM 压缩器反而使 token 成本上升 24–94%；仅掩码工具调用输出实现 8.6% 净 token 节省；最优策略随领域与任务长度变化。OpenHands 提供现成实现：ObservationMaskingCondenser（attention_window=100 之外的旧观测替换为占位符）、BrowserOutputCondenser（只留最近 1 条浏览器观测）、bash 输出超长截断并加『[Previous command outputs are truncated...]』前缀
+- **证据**：GPT-4o 上 60 个 DiscoveryBench 任务 × 8 种策略 = 480 次评测（6 个科学领域），对照无压缩基线；论文指出此前缺少系统比较，结论为简单便宜策略优先。代码取证（openhands-ai==0.39.0 wheel）：core/config/condenser_config.py:19-33（ObservationMasking attention_window=100、BrowserOutput attention_window=1）、runtime/utils/bash.py:343（截断前缀）
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 5。本批最有价值的负结果证据：为『先测零 LLM 成本基线』提供同行级支撑，且三臂 A/B 设计现成。
+- **测试设计**：把『无压缩』『工具输出掩码（attention_window 扫 20/50/100）』『LLM 摘要』三组放进同一 A/B 框架，仅当掩码组显著劣化或摘要组显著占优时才启用摘要压缩
+- 备注：领域是科学发现型编码（DiscoveryBench）而非 SWE-bench，外推需谨慎；置灰过早会丢失大仓库里『早先读过的关键文件内容』，窗口需按任务长度调；作者承认最优策略随任务长度变化——不存在单一占优的压缩器，这正是大规模并行 A/B 的用武之地
+
+#### S010 · tree-sitter 符号抽取 + 文件依赖图 PageRank 排序的「仓库地图」
+
+- **大类/来源**：仓库级理解｜[aider (Aider-AI/aider) 官方 repo map 文档与源码 aider/repomap.py](https://aider.chat/docs/repomap.html)｜证据等级：anecdotal｜定级：**A**
+- **承诺改进**：用 tree-sitter 解析源码抽取类/函数定义与签名，在「文件=节点、文件间依赖=边」的图上跑 personalized PageRank，按 token 预算（默认 1k token）裁剪出最相关片段，拼进每次改码请求 ｜ 〔并集·aider repo map 代码取证(70.3%定位)〕静态分析全仓 AST 构建符号定义/引用图，以文件为节点、引用为边跑 PageRank，输出按 token 预算截断的「最重要符号签名」地图；SWE Bench Lite 上 aider 正确定位待编辑文件的比例为 70.3%（用 gold patch 事后统计，求解过程不可见）。
+- **证据**：实现细节来自 aider/repomap.py：networkx 的 nx.pagerank(G, weight="weight")，personalize=100/len(fnames)（聊天内文件与被提及符号获更高个人化权重），边权为引用计数，节点排名再沿出边分摊到具体定义；RepoMap.__init__ 默认 map_tokens=1024、map_mul_no_files=8，用 grep_ast 的 TreeContext 按 token 预算裁剪。官方博客 https://aider.chat/2023/10/22/repomap.html 只有定性描述与样例 map，无对照实验或分数。可引用的系统级公开成绩来自 aider 官方 SWE-bench 评测：SWE-bench Lite 26.3%（此前榜首 Amazon Q Developer Agent 20.3%），SWE-bench main 570 题中 108 题正确 = 18.9%（对比 Devin 13.9%）；官方明确写明该配置「不使用 RAG、向量检索或工具」，仅靠静态分析 + repo map + 整文件读取 ｜ 〔并集·aider repo map 代码取证(70.3%定位)〕代码核对（本地抓取 aider/repomap.py）：:365-520 get_ranked_tags 构 networkx.MultiDiGraph 后 nx.pagerank(weight=...)；个性化启发式：chat 文件发出的引用边 ×50、模型提及的文件/标识符 ×10、snake/camelCase 且长度≥8 的标识符 ×10、下划线开头 ×0.1、定义处>5 个 ×0.1、引用次数取 sqrt 防高频低值；:524-544 把 PageRank 分数沿出边分配到 (文件,符号) 再排序。博客 2023-10-22 记载从 ctags 迁移 tree-sitter 的动因：签名更全、多语言 pip 可装、免去外部依赖。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 5 / 可测性 4。机制与系统成绩均可溯源，但对 repo map 本身无隔离消融——采用前必须用 chunk 给的开关对照设计自测。
+- **测试设计**：对照组 = 关闭 repo map（只按需 read 文件）；实验组 = 开启同一 tree-sitter+PageRank 地图（模型、prompt、工具、编辑格式完全一致）；在大仓库任务集上比最终解决率、平均输入 token、文件定位命中率三项
+- 备注：26.3% / 18.9% 是整体系统分，无法归因到 repo map 本身，官方无消融。实现成本：需 tree-sitter 语言包 + 依赖图构建，代码里有「Initial repo scan can be slow in larger repos」提示（首次扫描慢、需 SQLite 缓存 tags）。aider 早期用 ctags，官方博客明确说 tree-sitter 版提供更完整的调用签名并去掉外部 ctags 依赖。PageRank 排名对被引用次数敏感，在动态语言、反射、跨语言 monorepo 中依赖边不完整，可能漏掉关键文件 ｜ 〔并集·aider repo map 代码取证(70.3%定位)〕70.3% 是定位率不是解决率；×10/×0.1 等图权重是手工经验值未消融；SWE-bench 博客明确主张 repo map 优于 RAG 但未给出对照数字（属于定性立场）
+
+#### S012 · 把代码库解析成有向异构图（文件/类/函数 + 导入/调用/继承），让 LLM agent 做多跳图搜索定位
+
+- **大类/来源**：仓库级理解｜[LocAgent (arXiv:2503.09089)](https://arxiv.org/abs/2503.09089)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：用图表示捕获代码结构（文件、类、函数）及其依赖（导入、调用、继承），让 LLM agent 通过多跳推理搜索并定位相关实体
+- **证据**：真实基准上：微调 Qwen-2.5-Coder-Instruct-32B 达到 92.7% 文件级定位准确率，与当时 SOTA 闭源模型相当，但成本降低约 86%；并把下游 GitHub issue 解决率（多次尝试 Pass@10）提升 12%
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 3。图索引+多跳定位的收益数字如实；微调部分成本高，但图检索工具协议本身可在 harness 内直接 A/B。
+- **测试设计**：对照组 = grep/glob 文本检索定位；实验组 = 图搜索定位（同一生成模型、同一任务集）；同时比 top-1/top-3 文件命中、检索消耗 token，以及端到端 patch 正确率（不能只测定位指标）
+- 备注：定位准确率不等于改码正确率，必须在自己的任务集上验证下游收益；论文依赖特定微调模型与定制工具接口，迁移到通用 harness 需重做提示与工具协议
+
+#### S013 · RL 训练的专用检索 agent 替代 LLM 自发 grep（CodeGrep，含检索精度阈值判据）
+
+- **大类/来源**：仓库级理解｜[CodeGrep (arXiv:2608.05886)；CodeGrep: An RL-Trained Retrieval Agent for LLM Coding Agents（arXiv 2608.05886，2026-08-06）](https://arxiv.org/abs/2608.05886)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：现代 coding agent（Claude Code、OpenHands）把大量 token 花在找文件而非打补丁；用 14B 检索 agent 以 GRPO 端到端训练多轮并行 grep/glob/read 并返回候选文件给冻结的下游 coding agent；同时给出「下游收益需检索精度跨过阈值才出现」的判据 ｜ 〔并集·CodeGrep(gapfill)〕在 SWE-Bench Verified 全量 500 例上，14B 检索 agent（GRPO 端到端训练、多轮并行 grep/glob/read）保持通过率的同时大幅提效：27.0% vs 无检索基线 25.8%，已解决实例上轮次 −15%、token −19%；并给出下游收益的精度阈值——BM25 精度 0.375 会劣化 agent，Jina 精度 0.445 中性，CodeGrep 精度 0.677 才跨过「检索开始降低 rollout 成本」的阈值
+- **证据**：SWE-Bench Verified 全部 500 题：CodeGrep 解决率 27.0% vs 无检索基线 25.8%，在已解决实例上轮次 -15%、token -19%；跨检索器对比：BM25 精度 0.375 会拖垮 agent，Jina 精度 0.445 中性，CodeGrep 精度 0.677 才跨过「检索开始降低 rollout 成本」的阈值。基线观测：30B OpenHands agent 平均 23 轮、631K token/已解决问题 ｜ 〔并集·CodeGrep(gapfill)〕本次通过 arXiv API（id_list=2608.05886）读取原文摘要核实：通过率 27.0%/25.8%、轮次与 token 降幅、三个检索器的 0.375/0.445/0.677 精度阈值、以及基线成本画像（30B OpenHands agent 平均 23 轮、631K token/已解决问题）均照录摘要原文。另注明摘要中的「67K 开源 agent 轨迹 + CATM 挖掘监督 + Git worktree 多轮 RL 环境」为其训练设置。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 3。数字全部如实；直接复现需 RL 训练（高成本），但其『低精度检索不如不检索』的阈值判据可用现成检索器零训练复测——A/B 价值主要在负向结论。
+- **测试设计**：把检索器做成可替换组件做三档 A/B：现 harness 的 LLM 自发 grep / BM25 / 训练后检索 agent，固定下游改码模型与 prompt 模板，比解决率、轮次、token 与检索器精度
+- 备注：需要 67K 开放 agent 轨迹挖掘 + RL 训练环境，落地成本高（论文承诺开源模型、训练流水线与评测 harness）。精度阈值 0.677 来自单一模型/基准，跨任务稳定性需自验。最可落地的是它给出的负向结论：低精度检索比不检索更差 ｜ 〔并集·CodeGrep(gapfill)〕需要自行训练/部署检索模型，成本高；摘要称将开源模型与流水线但本次未核实发布状态。阈值 0.677 是 SWE-bench Verified 上的观测，不同仓库规模可能漂移。
+
+#### S014 · 检索结果重排成「文件中心」导航脚手架（RepoNav）
+
+- **大类/来源**：仓库级理解｜[RepoNav (arXiv:2609.08355, EMNLP 2026)；RepoNav: From Snippet Retrieval to File-Centered Repository Navigation for Code Agents（arXiv 2609.08355，2026-09-08）](https://arxiv.org/abs/2609.08355)｜证据等级：ablation｜定级：**B**
+- **承诺改进**：现有检索工具返回扁平、孤立的代码片段列表：能命中相关文件，但不足以让 agent 在同一文件内区分目标函数与语义相近的兄弟符号；RepoNav 做轻量后置重排，把检索结果重组为文件中心的导航脚手架（紧凑结构线索 + 候选目标），引导 agent 按需浏览文件结构、比较兄弟符号后再选目标函数 ｜ 〔并集·RepoNav(gapfill)〕检索工具返回扁平的碎片 snippet 列表虽能命中文件，但缺少区分「目标函数 vs 同文件内语义相似邻居」的结构：RepoNav 作为轻量后置接口把检索结果重组为文件为中心的导航脚手架，展示紧凑结构线索与候选目标，引导 agent 按需浏览文件结构、对比同文件兄弟符号后再选目标；LocBench 上跨多个模型提升函数级定位并缩小 file-to-function 差距；在仓库级问答基准上同样有提升
+- **证据**：在 LocBench 上跨多个模型提升函数级定位、缩小 file-to-function gap；受控消融表明增益来自「结构化证据组织」而非单纯暴露更多文件结构；在仓库级问答基准上同样有提升（摘要未给出具体数值） ｜ 〔并集·RepoNav(gapfill)〕本次通过 arXiv API（id_list=2609.08355）读取原文摘要核实：摘要明确写有「controlled ablations demonstrate that these gains come from structured evidence organization rather than simply exposing additional file structure」，即增益归因于结构化证据组织而非单纯多给文件结构。摘要未给出具体百分点数字（已如实记录为定性承诺）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 3 / 可测性 5。claim 无夸大但全是定性承诺；呈现层改动极便宜，适合顺手进 A/B，预期单项收益有限故 B。
+- **测试设计**：对照组 = 现 harness 的扁平文件/片段列表；实验组 = 完全相同的检索器 + RepoNav 式重排（只改呈现、不改召回）；比函数级命中率、注入 token 数与端到端解决率
+- 备注：摘要未给出具体提升幅度，需读全文取数后再决定是否采用；重排实现较轻，但依赖文件级 AST/符号结构可用（与 tree-sitter 依赖共用） ｜ 〔并集·RepoNav(gapfill)〕摘要无量化数字，属于定性收益；论文未说明在大仓库上的索引开销变化。
+
+#### S016 · 工具输出按意图闸门过滤成「紧凑证据包」，原文外置可按需回取（可逆压缩）
+
+- **大类/来源**：上下文管理｜[ContextSniper (AntTrail, arXiv:2607.01916)；可逆压缩机制见 DTOC (arXiv:2609.26121)](https://arxiv.org/abs/2607.01916)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：agent 常把大量上下文预算花在整文件读取、宽泛搜索和长终端输出上，有用证据与噪声混杂；ContextSniper 在代码与动作记忆三层抽象上建索引、混合排序召回、用意图感知的上下文闸门过滤长工具输出，返回紧凑证据包同时保留按需恢复完整源码；DTOC 则把完整工具输出留在外部记忆，上下文里只放可按需重建的占位符
+- **证据**：ContextSniper：每条件 50 题的匹配对照，OpenClaw + SWE-bench Lite 总 token -51.5%、记录成本 -36.4%；OpenCode + SWE-bench Pro 总 token -40.0%、平均交互轮次 -28.1%；两种宿主 agent 下提交解决率各只差 1 题（/50）。DTOC：DeepSWE 上对响应型模型（Sonnet 4.6、GPT-5.4）输入 token 分别 -10.3% / -12.7%，agent 步数 -2.4% / -32.3%，解决率提升 2.5× / 1.5×，每解决任务成本降 3× / 3.5×；消融显示「可逆性是关键」——只关不压的变体反而退化，完整 DTOC 以更低上下文成本恢复基线准确率
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 5 / 可测性 5。数字全部与来源吻合，机制与负面细节标注诚实；工具输出闸门+可逆外置是大仓 token 治理的高价值、易 A/B 策略。
+- **测试设计**：对照组 = 现 harness 的整段工具输出直塞（必要时加普通截断）；实验组 = 意图感知过滤 + 外部原文可回取；同任务集比解决率、输入 token、步数，并额外做「截断 vs 可逆压缩」两档以复现可逆性消融
+- 备注：ContextSniper 每条件仅 50 题，解决率差异 1 题，统计力弱；DTOC 效果强依赖模型（GPT-5.5 一例解决率翻倍、成本减半，但另一些模型解决率不变且成本反升）；两者机制不同（过滤式 vs 占位符式），数字不可互相替换
+
+#### S032 · 压缩摘要必须做来源校验（Source-Judged Compaction）：把「环境里没发生过的事」从摘要里剪掉
+
+- **大类/来源**：上下文管理｜[Prune the Summary, Not the History: Source-Judged Compaction for Long-Horizon Agents (arXiv 2610.20927)](https://arxiv.org/abs/2610.20927)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：压缩摘要会混入压缩器自己写的推理，agent 事后无法区分事实与臆测；在广泛使用的结构化压缩器上，83% 的失败运行可追溯到'执行了一条环境输出并不支持的摘要条目'
+- **证据**：摘要：'In an analysis of a widely used structured compressor, 83% of failed runs trace back to an action that carries out a specific summary entry, most of which no environment output supports'。对策 Source-Judged Compaction（SJC）为训练无关的后处理：给每条摘要打分（是否在环境输出或上一版摘要中有出处），无出处的删掉，仅增加一次廉价判定调用；'SJC improves cross-run reliability over the underlying compressor by 2.1%-8.9% without increasing the agent's token usage'（AppWorld 与 OfficeBench，两种 agent 模型）
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 4。arXiv:2610.20927 摘要核验：83% 失败追溯、SJC 2.1%–8.9% 跨 run 可靠性、不增 token、AppWorld/OfficeBench 双基准双模型，全部吻合；对长会话摘要污染这一并行产线顽疾有直接价值，且判定器后处理极易做 A/B。
+- **测试设计**：对照组=现有 compaction 流程；实验组=在压缩后加来源判定（判定器可用小模型）；在同一批长时程大仓库任务上比较通过率、跨 run 稳定性与'由无出处摘要条目导致的失败'占比
+- 备注：评测在 AppWorld/OfficeBench 而非代码仓库，迁移到 coding 需自建判定器与出处标注；判定器本身有误判风险（会剪掉真实但被压缩丢格式的条目），需实测剪枝率。收益为跨 run 可靠性 2.1–8.9%，不是通过率跃升
+
+#### S033 · 把治理/安全约束「钉」在上下文之外（Constraint Pinning），避免被压缩静默抹除
+
+- **大类/来源**：上下文管理｜[Governance Decay: How Context Compaction Silently Erases Safety Constraints in Long-Horizon LLM Agents (arXiv 2606.22528)](https://arxiv.org/abs/2606.22528)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：上下文压缩会静默删除 agent 本来稳定遵守的约束：在 1,323 个 episode 上，违规率从'约束完整可见时 0%'升到压缩后 30%（部分模型达 59%）；把约束隔离在有损压缩之外可把违规率恢复到 0%
+- **证据**：摘要：'Across 1,323 episodes, violation rises from 0% with the policy in full context to 30% after compaction, reaching 59% for some models; when the constraint survives the summary, violation remains 0%, but when it is dropped, violation reaches 38%'；提出 Compaction-Eviction Attack（对抗性上下文诱导摘要器省略合法策略，'optimized injections defeat every evaluated model'）与 Constraint Pinning（训练无关、把治理约束从有损压缩中隔离，'restores violation to 0% in our benchmark'）。基准为 ConstraintRot（确定性工具调用打分）
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 5。arXiv:2606.22528 摘要核验：1,323 episodes、0%→30%（峰值 59%）、约束存活 0% vs 被丢弃 38%、攻击击败所有模型、Pinning 恢复 0%，全部逐字吻合；把权限/流程约束钉在压缩之外是黑灯工厂的硬需求，违规探针有确定性打分，A/B 成本极低。
+- **测试设计**：对照组=约束只写在会话上下文里（会经历压缩）；实验组=约束外置为不可压缩的 pinned 区（每轮重新注入/由 harness 强制）；用带确定性打分的违规探针任务集比较违规率与被抹除率
+- 备注：该文聚焦安全/治理约束，代码仓库场景可类比为权限与流程约束；攻击面（Compaction-Eviction）意味着外置约束本身也要防注入，不能简单当作安全保证。评测为合成场景，非真实仓库
+
+#### S034 · 监控并抑制「上下文腐化下的提前放弃（premature termination）」，并用并行采样补探索
+
+- **大类/来源**：上下文管理｜[Diagnosing and Mitigating Context Rot in Long-horizon Search (arXiv 2606.29718)](https://arxiv.org/abs/2606.29718)｜证据等级：ablation｜定级：**B**
+- **承诺改进**：长上下文下模型会在耗尽上下文前很久就放弃或给出不确定的错误答案（premature termination），该比率与上下文长度正相关；系统比较了 7 种上下文管理方法，并用行为感知的过滤做并行采样带来 2.6%–4.9% 增益
+- **证据**：摘要：'Through a systematic study of four flagship models across three benchmarks, we identify a previously overlooked phenomenon, which we term premature termination'；'By controlling for query difficulty, we show that the premature termination rate is positively correlated with context length'；'For context management, we analyze seven methods across three categories and show that they are inherently test-time scaling strategies that reduce the premature termination rate'；'For parallel sampling, we develop a behavior-aware filtering strategy and observe a performance gain of 2.6% to 4.9% across three aggregation methods'
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 3 / 可测性 4。arXiv:2606.29718 摘要核验：premature termination 现象、4 模型×3 基准、与上下文长度正相关、7 方法 3 类、并行采样 2.6%–4.9%，全部吻合；但证据域不在 coding，迁移到大仓库的'放弃型失败'监控需自测，故 largeRepoValue 降到 3。
+- **测试设计**：对照组=不做早停监控；实验组=检测提前放弃信号后强制换策略重试或并行采样；在大仓库任务集上比较'放弃型失败'占比与最终通过率，验证 2.6–4.9% 量级增益能否复现
+- 备注：该研究是深度搜索/检索任务，非代码仓库；作者也强调上下文管理方法本质是 test-time scaling，其收益依赖额外算力预算，与黑灯工厂成本模型需一并核算
+
+#### S080 · 仓库约定文件分层加载：AGENTS.md/GEMINI.md 根→cwd 拼接 + 就地 JIT 目录扫描 + 字节预算硬截断
+
+- **大类/来源**：上下文管理｜[Codex CLI (openai/codex) + Gemini CLI (google-gemini/gemini-cli) + GitHub Copilot + Cursor](https://github.com/openai/codex/blob/c419fd01a70dd1d05356da443ac44328bda2e6f4/codex-rs/core/src/agents_md.rs)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：新一代商用 harness 全部把「仓库约定」做成独立的文件层而非写进 prompt 模板：Codex 用 AGENTS.md（+本地覆盖 AGENTS.override.md），从项目根到 cwd 逐级拼接内容并受 project_doc_max_bytes 硬预算约束；Gemini CLI 用 GEMINI.md 做 global→workspace→JIT 三层，其中 JIT 层在工具访问某文件/目录时按需扫描该目录及其祖先直到可信根；Copilot 同时支持 .github/copilot-instructions.md、.github/instructions/NAME.instructions.md（applyTo glob）与 AGENTS.md（目录树中最近的优先，也接受根目录的 CLAUDE.md / GEMINI.md）。
+- **证据**：Codex 端为代码级事实：core/src/agents_md.rs:43-45 定义两个文件名常量（AGENTS.md / AGENTS.override.md）；agents_md.rs:1-22 的模块注释写明「从 project root 到 cwd 沿途收集所有 AGENTS.md 并按此顺序拼接」「不越过 project root」，project_root_markers 未配置时默认 .git；agents_md.rs:64-67 实测逻辑 `if config.active_project.is_untrusted() { return ... }`——项目被判为 untrusted 时直接不加载仓库指令；agents_md.rs:68 以 config.project_doc_max_bytes 作为总预算循环，agents_md.rs:157-166 在单文件超预算时 data.truncate(remaining) 并打 warn「project doc exceeds remaining budget; truncating」；预算默认值 32 KiB 见 config/src/config_toml.rs:75 `DEFAULT_PROJECT_DOC_MAX_BYTES = 32 * 1024` 与 core/src/config/mod.rs:255；agents_md.rs:273-296 的 candidate_filenames 还支持 project_doc_fallback_filenames 兜底文件名（并拒绝含路径分隔符的条目以防路径注入）。Gemini 端为官方文档事实：docs/cli/gemini-md.md 写明三级层次——「Global context file: ~/.gemini/GEMINI.md」「Environment and workspace context files」「Just-in-time (JIT) context files: When a tool accesses a file or directory, the CLI automatically scans for GEMINI.md files in that directory and its ancestors up to a trusted root」，并说明 CLI footer 会显示已加载的上下文文件数量；同文档还给出 `context.fileName` 可配置为 ["AGENTS.md","CONTEXT.md","GEMINI.md"]（跨工具约定兼容）与 @file.md 导入语法。Copilot 端为官方文档事实：docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot 列出三种仓库指令（copilot-instructions.md 全仓库、.github/instructions/NAME.instructions.md 路径相关、AGENTS.md），并明确「If the path you specify matches a file that Copilot is working on, and a repository-wide custom instructions file also exists, then the instructions from both files are used」以及「the nearest AGENTS.md file in the directory tree will take precedence」。四家均无对照实验数字，属官方经验。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 4 / 可测性 4。机制描述与三家源码/官方文档逐点吻合，但全为厂商实现事实、零效果证据，价值判断需自研 A/B 自行产出。
+- **测试设计**：对照组：单一根级约定文件、每次 turn 全量注入；实验组：按 codex/gemini 语义实现分层 + JIT + 32 KiB 预算截断。在同一批大型真实仓库 issue 集上跑，比较 pass rate、每任务注入 instruction token 数、以及「约定违规率」（用规则检查器判定，如是否改了禁止目录/是否用了指定测试命令）。
+- 备注：反面风险：Codex 对 untrusted 项目根本不读仓库指令，等于「不信任就不给约定」——若 A/B 集里混有陌生仓库，该组会静默失去构建/测试命令，pass rate 可能因安全策略而非上下文机制下降，必须把 trust 变量单独控制。实现成本中等（需要目录树扫描 + 按工具访问路径触发重扫 + 预算截断的确定性顺序）。另注意 Gemini 的 JIT 语义依赖工具实际访问路径，不同 harness 触发时机不同会造成不可比。
+
+#### S082 · 上下文压缩四件套：阈值触发 + 结构化交接摘要 + 保留最近比例原文 + 摘要失败降级为截断
+
+- **大类/来源**：上下文管理｜[Gemini CLI 源码 (chatCompressionService.ts) + Codex CLI 源码 (compact.rs) + Copilot 官方文档《Context management》](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/context/chatCompressionService.ts)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：三家给出了可互相印证的压缩协议：Gemini CLI 在历史 token 达到模型上限的 50%（DEFAULT_COMPRESSION_TOKEN_THRESHOLD = 0.5，可配）时自动压缩，压缩时保留最近 30% 的原文（COMPRESSION_PRESERVE_THRESHOLD = 0.3）其余交给模型摘要，并且如果上一次摘要已经失败就只做截断不再重试模型以免重复烧钱；Codex 用固定的结构化交接提示词做压缩，并把压缩阈值配置成 model_auto_compact_token_limit（还区分「全量上下文」与「仅 carried prefix 之后的 token」两种计量范围）；Copilot CLI 在约 80% 上下文占用时后台开始压缩，留 20% buffer，若压缩未完成时上下文涨到约 95% 则暂停等待。
+- **证据**：Gemini 端为源码级事实：packages/core/src/context/chatCompressionService.ts:45 `export const DEFAULT_COMPRESSION_TOKEN_THRESHOLD = 0.5;`（注释「Default threshold for compression token count as a fraction of the model's token limit」）；:269 `const COMPRESSION_PRESERVE_THRESHOLD = 0.3;`（注释「The fraction of the latest chat history to keep」）；:500-517 判定 `originalTokenCount >= threshold * tokenLimit(model)` 否则返回 NOOP；:556-560 用 findCompressSplitPoint(truncatedHistory, 1 - COMPRESSION_PRESERVE_THRESHOLD) 找切点；:530-545「If summarization previously failed (and not forced), we only rely on truncation. We do NOT attempt to invoke the LLM for summarization again to avoid repeated failures/costs.」并返回 CompressionStatus.CONTENT_TRUNCATED；:490-492 压缩前触发 PreCompress hook（Manual/Auto 两种 trigger）。Codex 端：codex-rs/prompts/templates/compact/prompt.md（经 codex-rs/prompts/src/compact.rs:1 `include_str!` 内嵌）为固定的结构化交接提示「You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task. Include: Current progress and key decisions made / Important context, constraints, or user preferences / What remains to be done / Any critical data, examples, or references needed to continue」；core/src/config/mod.rs:655-659 与 config/src/config_toml.rs:180-191 给出 model_auto_compact_token_limit、model_auto_compact_token_limit_scope（「applies to the full context or only to tokens after the carried prefix in the current compaction window」）与 model_post_turn_compact_threshold_percent（0–100，0 关闭）；core/src/compact_token_budget.rs 实现了「token 预算型压缩」——跳过模型摘要直接开新窗口，但仍以同样的 compaction 生命周期呈现给 hook 与 ContextCompaction turn item。Copilot 端为官方文档事实：docs.github.com/en/copilot/concepts/prompting-and-context/context-management 写明「when your conversation reaches approximately 80% of the context window's capacity, Copilot CLI automatically starts compacting the context in the background. This leaves a buffer of approximately 20% ... If the context fills to approximately 95% before compaction finishes, Copilot CLI pauses briefly to wait」；压缩内容为「a structured summary ... captures the goals of the conversation, what was done, key technical details, important files, and planned next steps」，并保留「any original user instructions and the current state of any plans or to-do lists」以及压缩期间新增的消息。均无对照实验数字。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 5 / 可测性 4。四件套参数与三来源逐点吻合，是长时程任务的必答题；但所有数字都是实现默认值而非调优结果，evidenceGrade 如实标注为 anecdotal。
+- **测试设计**：对照组：只做截断式压缩（丢弃最旧消息）或干脆不压缩直到超限报错；实验组：按 Gemini 参数实现（阈值 0.5、保留 30% 原文、失败降级截断）+ Codex 的结构化摘要模板 + Copilot 的后台 80%/20%/95% 节奏。在长任务（>100 轮）集上比较最终 pass rate、压缩后「是否记得已改文件/已跑过的测试」的正确率（用探针判定）、以及总 token 成本。
+- 备注：反面风险：Copilot 官方明确说压缩「can't be reverse a completed compaction」且细粒度信息必然丢失；Gemini 的 0.5/0.3 是硬编码常量而非调优结果，把它们搬到我们 harness 前应先在自己的任务分布上重标定。降级路径（截断而非摘要）会让模型忘记早期决策，必须与「不压缩」组对照才知道是净收益。三个来源都没有公开的压缩消融基准（哪组参数更好无官方数据），所有数字均为实现默认值。；修正建议：行号引用改为常量名锚点；如需坐实 Codex 配置项可补引 core/src/config/mod.rs 与 config_toml.rs。
+
+#### S083 · 大工具输出外置：超阈值只回「文件路径 + 预览」，原输出落临时文件供按需回读
+
+- **大类/来源**：上下文管理｜[GitHub Copilot 官方文档《Context management》 + Gemini CLI 源码 (chatCompressionService.ts)](https://docs.github.com/en/copilot/concepts/prompting-and-context/context-management)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：对付单条巨量工具输出，主流做法不是截断而是「搬出上下文」：Copilot CLI 默认把超过 20 KiB 的工具输出保存到临时文件，模型只收到文件路径和一段预览，且该行为覆盖所有工具包括 MCP 提供的工具，阈值可用环境变量 COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES 调整；Gemini CLI 走的是「预算内保留、超预算截尾」路线——工具响应 token 预算 50,000，超过后把老的工具响应截断到最后 30 行并写入临时文件。
+- **证据**：Copilot 端为官方文档事实：context-management 页写明「tool output larger than 20 KiB is saved to a temporary file by default. The model receives the file path and a preview instead of the full output. This applies to all tools, including tools provided by MCP servers.」以及「To change the limit, set `COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES` to a positive number of UTF-8 bytes before starting the CLI. Increasing the limit leaves less context available for the conversation and subsequent tool calls.」同页还给出 /context 的占用分解（System Prompt / Custom Instructions / System Tools / MCP Tools / Messages / Free Space / Buffer），说明工具 schema 本身也是固定开销。Gemini 端为源码级事实：packages/core/src/context/chatCompressionService.ts:274 `const COMPRESSION_FUNCTION_RESPONSE_TOKEN_BUDGET = 50_000;`，:355-363 注释「Once the budget (COMPRESSION_FUNCTION_RESPONSE_TOKEN_BUDGET) is exceeded, any older large tool responses are truncated to their last 30 lines and saved to a temporary file. This ensures that compression effectively reduces context size even when recent turns contain massive tool outputs (like large grep results or logs).」，:416 调用 saveTruncatedToolOutput 落盘。无官方对照实验数字。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 5 / 可测性 5。大输出外置机制与两家默认参数均经一手来源核实，是大仓库省 context 的刚需设计；证据为厂商实现事实，收益曲线需自测。
+- **测试设计**：对照组：工具输出原样全量注入；实验组：超过阈值（20 KiB / 50k token 预算）改为「路径 + 预览 + 截尾 30 行」并提供回读工具。比较 pass rate（agent 能否在需要时回读到被外置的内容）、平均 context 占用、以及因「看不到输出」导致的误判次数（人工/LLM 判分）。
+- 备注：反面风险：模型可能不去回读文件而基于预览瞎猜；Copilot 官方也提示阈值调大=留给后续对话的 context 变少。Gemini 的「最后 30 行」是按行截尾，对 JSON/结构化输出会截断成非法片段，需要我们改成「结构感知截断 + 头部摘要」。二者都只报告默认阈值，未报告调参收益曲线。；修正建议：行号引用改为常量名锚点（COMPRESSION_FUNCTION_RESPONSE_TOKEN_BUDGET）以免漂移。
+
+#### S118 · 上下文压缩：只保留最近 5 条 observation 全文，更早的折叠成单行
+
+- **大类/来源**：上下文管理｜[SWE-agent](https://arxiv.org/abs/2405.15793)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：每步只把最近 5 条 observation 全文放进上下文、更早的压成一行，保留计划与动作轨迹但丢弃过期的文件内容；比保留完整历史高 3.0pp，在 Claude 3 Opus 上差距更大（8.1 对 5.4，相对 +50%）。
+- **证据**：论文 Table 3（Context 消融，SWE-bench Lite / GPT-4 Turbo）：Last 5 Obs. 18.0；Full history 15.0（↓3.0）；w/o demo 16.3（↓1.7）。§B.1 网格（dev 37 例乘 5 采样均值）交叉验证，temperature 0.0/window 100 下：GPT-4 Turbo Last-5 = 15.1 对 Full = 14.1；Claude 3 Opus Last-5 = 8.1 对 Full = 5.4。§3 动机：removing most content from prior observations ... avoids showing outdated file information。空输出处理：无 stdout 时返回专门文案 Your command ran successfully and did not produce any output。配置确认 config/sweagent_0_7/07.yaml:99-101 history_processors 为 type: last_n_observations / n: 5。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 5。论文消融与附录网格数字双双吻合，keep_last 是单旋钮可扫的上下文策略；注意现行默认配置已改用 cache_control，需一并纳入对照臂。
+- **测试设计**：keep_last 取 {2, 5, 10, 全量} 四档做扫描，锁定模型、窗口、温度；主指标 %Resolved，副指标总输入 token、有效轮数（达到 submit 的轮数）、因过期上下文导致的重复读取同一文件次数。
+- 备注：n=5 来自 37 例 dev 小样本网格，统计功效弱；网格显示该效应在 GPT-4 上仅 +1.0pp（15.1 对 14.1），远小于 Table 3 的 +3.0pp，两处证据不完全一致，落地前应在更大任务集上重测。v1.0 默认已换成 type: cache_control / last_n_messages: 2（config/default.yaml:67-69），即该策略在现行默认配置里已被替代。
+
+#### S129 · harness 组件级可拆解消融：上下文管理/规划/动作空间（按模型分档）
+
+- **大类/来源**：上下文管理｜[An Empirical Study of Harness Design for Coding Agents (arXiv 2609.20804)；论文《An Empirical Study of Harness Design for Coding Agents》](https://arxiv.org/abs/2609.20804)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：在固定执行循环下单独消融三个组件（176 组匹配设置 × 4 模型 × SWE-Bench Verified + Terminal-Bench 2.1）：上下文管理的价值随窗口收紧而放大（managed−T0 差距从 32k 的 35.7pp 缩到 128k 的 2.7pp）；预定义工具集对 bash 不熟的弱模型提升 15.0pp（SWE-Bench）/10.1pp（TB），而强模型用 bash-only 反而更好且便宜（成本降 53%/30%）。 ｜ 〔并集·2609.20804 规划自适应(C分片)〕在固定执行循环、只变三个组件（planning / action space / context management）的轻量 harness 上：规划对弱模型是准确率脚手架，对强模型则变成成本节省手段，准确率基本不变。
+- **证据**：Table 3（SWE-Bench Verified SR%）：32k 窗口下 T0(无管理)→T1(elision) 差距 30B 9.40→20.60、120B 11.40→43.00、550B 6.40→51.40、Mistral-3.5-128B 12.60→64.40；model-averaged managed−T0 差距 35.7pp(32k)→15.9(64k)→5.5(96k)→2.7(128k)，T0 溢出失败率 78.7%→8.7%；TB 2.1 对应 9.5→7.5→4.8→2.8pp，溢出率 61.0%→12.1%，所有 managed 层零溢出。Table 5：planning 开启使 30B 的 token/call +293.2%、turns +474.0%，而 550B 为 −24.3%/−24.5%。动作空间：30B 用预定义工具集比 bash-only 高 15.0pp(SWE-Bench)/10.1pp(TB)；550B 用 bash-only 反而 +3.6pp/+5.6pp 且成本降 53%/30%，bash-only 轨迹少发 32%/24% 次调用；Mistral 在 TB 上用全工具反而输给 bash-only 6.7pp。轨迹层面：上下文管理延长轨迹但不改变行为，规划改变轨迹停止点，动作空间改变写码粒度。 ｜ 〔并集·2609.20804 规划自适应(C分片)〕消融级证据，摘要：'Across four models evaluated on SWE-Bench Verified and Terminal-Bench 2.1, we evaluate 176 matched settings ... (3) Planning shifts from an accuracy scaffold for weaker models to a cost saver for stronger models, with little change in accuracy.' 轨迹级解释：'planning changes where trajectories stop'。摘要未给出百分比，故不引用具体数值。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 5。全文逐格确认：Table 3 四模型 32k 下 T0→T1（9.40→20.60 / 11.40→43.00 / 6.40→51.40 / 12.60→64.40）、managed−T0 差距 35.7→15.9→5.5→2.7pp、溢出率 78.7%→8.7%、TB 9.5→2.8pp、动作空间 ±15.0/10.1 与 +3.6/5.6pp、成本 −53%/−30%、T2 recall 36/64（56.3%）从未调用——claim 数字全部吻合，仅 evidence 一处指标名错标需修。
+- **测试设计**：保持主循环不动，只替换 context-management 策略（T0/T1/T2/T3/T4）× 上下文窗口预算（32k/64k/128k）做网格；动作空间与 planning 各做一次单独开关，用 SR、overflow 率、tokens/题三项指标。
+- 备注：反面结论明确：让模型可回溯被省略内容（T2 recall）几乎不被调用且不涨分（64 个 T2/T4 设置中 36 个即 56.3% 从未调用 recall），不要为此加机器。多组件收益非线性叠加。 ｜ 〔并集·2609.20804 规划自适应(C分片)〕2026-09 新论文，摘要未给具体数值，落地前建议直接复现其 matched-setting 方法；结论与『过度规划有代价』（2604.12147）方向一致。；修正建议：将 evidence 中『Table 5：planning 开启使 30B 的 token/call +293.2%、turns +474.0%，而 550B 为 −24.3%/−24.5%』修正为『Table 5：planning 开启使 30B 的 turns +293.2%、tool calls +474.0%（input tokens/call +104.1%），而 550B 的 turns/tool calls 为 −24.3%/−24.5%』。
+
+#### S155 · 上下文中毒（context poisoning）治理：坏会话即弃 + 工具输出事前校验
+
+- **大类/来源**：上下文管理｜[Roo Code 官方 context-poisoning 文档](https://github.com/RooCodeInc/Roo-Code/blob/main/apps/docs/docs/advanced-usage/context-poisoning.md)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：错误/无关数据一旦进入上下文会持续污染后续推理：症状是输出退化、工具调用与请求错位、编排链停滞死循环；官方结论是「唤醒提示词无效，唯一可靠恢复是硬重置会话」，预防手段包括粘贴数据精选、拆小任务让旧信息老化出窗、在坏工具结果进入上下文前删掉该消息。
+- **证据**：apps/docs/docs/advanced-usage/context-poisoning.md 全文：官方列出的成因（模型幻觉、过期代码注释、带控制字符的粘贴、窗口溢出）与症状（Orchestrator chains may stall, loop indefinitely, or fail to complete）；明确 A corrective prompt might temporarily suppress symptoms... 与 treat that session as disposable。这是官方经验文档，无实验数字。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 4 / 可测性 3。官方经验文档级证据，claim 无夸大；「唤醒提示词无效」本身是可消融的假设，防御性策略适合做成注入实验。
+- **测试设计**：注入实验：向会话/子代理报告注入受控坏信息（错误事实、控制字符、矛盾输出），A/B 三种恢复策略——纠正提示词、回滚到检查点重启、硬重置新会话（带/不带 memory bank 重注），比恢复成功率与恢复期 token。
+- 备注：这条是防御性策略而非提效策略；「唤醒提示词无效」是官方经验断言未做实验佐证，正好可作为我们的消融点。检测器可用他们列的症状做特征（重复输出、工具调用错位、循环）做统计熔断。
+
+#### S164 · 词法锚定 + 图结构局部扩展的检索（LARGER，替换纯 grep 导航）
+
+- **大类/来源**：仓库级理解与检索｜[LARGER: Lexically Anchored Repository Graph Exploration and Retrieval（arXiv 2605.16352，2026-05-08）](https://arxiv.org/abs/2605.16352)｜证据等级：ablation→**benchmark**（K3 修正）｜定级：**A**
+- **承诺改进**：把文件定位形式化为「词法锚定的结构化定位」：从词法匹配出发对齐到图锚点，在 agent 既有的搜索循环内做置信度过滤的局部扩展；无需外部图数据库或专用图接口即可接入现有 CLI coding agent；LocBench 文件级 Acc@5 相对最强基线 +13.9pp（调优超参）/ +11.8pp（固定超参），并在 MuLocBench、SWE-Atlas Test Writing、SWE-Atlas Codebase QA 上一致增益
+- **证据**：本次通过 arXiv API（id_list=2605.16352）读取原文摘要核实：摘要明确给出「四个基准，覆盖定位、测试生成、代码库理解」以及 LocBench Acc@5 的两个数字（+13.9 调优 / +11.8 固定超参）；MuLocBench 与 SWE-Atlas 两项按原文转述为「一致增益」，未给出具体数值。未读全文，未核实「最强基线」具体是哪个方法。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 4。定位阶段增益数字吻合且无额外图服务基建要求，适合作为 monorepo 检索层的 A/B 候选。
+- **测试设计**：在固定任务集上做「纯 grep/glob 基线 vs 词法锚定+图扩展」的 A/B，主指标为文件级 Acc@5 / 改对文件率，辅指标为达到同等定位准确率所需的 token 与工具调用轮次。
+- 备注：定位类基准（LocBench/MuLocBench）与 SWE-bench 级仓库仍非 10 万+ 文件 monorepo；需要预先构建静态分析索引，工程成本中等。摘要未给失败案例分析。；修正建议：evidenceGrade 由 ablation 改为 benchmark。
+
+#### S165 · RepoAtlas：select–project–refresh 的动态仓库视图（省 token 又提 resolve rate）
+
+- **大类/来源**：上下文管理 / 仓库级理解与检索｜[RepoAtlas: Guiding Coding Agents via Evolving Multimodal Repository Views（arXiv 2609.16936，2026-09-15）](https://arxiv.org/abs/2609.16936)｜证据等级：ablation→**benchmark**（K3 修正）｜定级：**A**
+- **承诺改进**：免训练的仓库图视图模块，用 select–project–refresh 循环维护动态视图：结合 issue 证据与 agent 当前探索状态，在固定预算下选出任务相关区域，同时投影为视觉与文本两种互补表示，并在探索状态变化导致视图过时后刷新；SWE-bench Verified 上相对最强的多模态图基线 resolve rate +2.4 个百分点，同时平均输入 token −5.8%、模型调用数 −7.8%；跨三个不同家族与规模的模型增益一致
+- **证据**：本次通过 arXiv API（id_list=2609.16936）读取原文摘要核实：resolve rate、输入 token 与模型调用数三项数字，以及「相对最强多模态图基线」「跨三个模型家族与规模一致」的实验设置描述均照录摘要原文。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 3。「固定预算选区+过期刷新」的上下文治理思路正确且数字吻合，但增益小、需多模态投影基建，testability 中等。
+- **测试设计**：A/B：基线线性文本上下文 vs 启用 RepoAtlas 视图循环（预算与模型相同），同时记录 resolve rate、输入 token、模型调用数三项，任一项显著劣化即判负。
+- 备注：resolve rate 仅 +2.4pp，属小幅增益；多模态表示要求模型具备读图能力，对只支持文本的模型需另做投影变体验证（论文未覆盖）。；修正建议：evidenceGrade 由 ablation 改为 benchmark。
+
+#### S166 · 深度 agentic 检索 vs 预建语义索引：对可索引仓库，前者未必更好且更贵
+
+- **大类/来源**：仓库级理解与检索｜[Deep Agentic Search for Repository-Level Code Question Answering: An Empirical Study（arXiv 2608.01507，2026-08-02）](https://arxiv.org/abs/2608.01507)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：对只读的仓库级代码问答，SWE-QA 上语义搜索答对 65.2%，深度 agentic 检索（规划 agent 派子 agent 在隔离上下文窗口里 grep）只答对 46.2%，且前者产出每个正确答案的成本不到后者的一半；失败模式编码显示深度 agentic 检索没有消除失败而是引入新的一类——其失败中最大占比 41.8% 发生在规划者与子 agent 的交接处，且通常是静默失败，表现为流畅自信的错误答案
+- **证据**：本次通过 arXiv API（id_list=2608.01507）读取原文摘要核实：65.2% / 46.2% 两个正确率、"cost less than half" 的成本比较、以及 41.8% 交接处静默失败的分类统计均照录摘要原文。摘要指出被对比的两条设计线为 Semantic Search（预建向量索引）与 Deep Agentic Search（grep-search by subagent），并点名 Claude Code、Codex、Antigravity 等近期 agent 已广泛采用后者。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 5。数字与摘要完全吻合，是对「派子 agent 检索」主流设计的直接证伪性证据；只读问答场景，外推到改码任务需谨慎（条目 notes 已如实声明）。
+- **测试设计**：同一批只读仓库理解任务 A/B：预建向量/BM25 索引直查 vs 规划者+子 agent 隔离检索；主指标正确率，次指标每题成本，并单独统计交接处静默失败率。
+- 备注：证据范围是只读问答，不是改代码任务；对需要探索-行动交织的修复任务，作者与本文都不能保证结论外推。该文与 CodeGrep（同为 2026，见下条）方向一致，但对可索引仓库给出的是语义检索胜出的相反结论，差异点是只读 vs 改码。
+
+### 3.2 记忆与技能复用（26 条，A 级 15 条）
+
+#### S003 · 文件式外置记忆（structured note-taking / memory tool）
+
+- **大类/来源**：记忆｜[Anthropic context management 公告 + 《Effective context engineering for AI agents》博客 + 《Effective harnesses for long-running agents》工程博客](https://claude.com/resources/articles/context-management)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：把待办、决策、中间产物持久化到上下文窗口之外的文件，需要时再拉回：memory tool + context editing 在内部 agentic search 评测中比基线高 39%；官方博客用 Claude 打 Pokémon（数千游戏步）演示跨上下文重置续作；配套实践承诺 initializer agent + 进度文件 + 特性清单可让无记忆新会话快速恢复状态
+- **证据**：Anthropic 官方对照数字（Sonnet 4.5 内部 agentic search 集合：组合 +39%；数字来自内部评测、基准名未公开）；Pokemon 定性案例：agent 自发维护地图与战斗策略笔记并在上下文重置后恢复进度。配套工程实践（无量化数字）：initializer 会话产出 init.sh + claude-progress.txt + JSON feature list（200+ 功能项，只允许改 passes 字段）+ git 历史，后续会话读回续作；选 JSON 而非 Markdown 的理由是模型更不易擅自改写，值得照抄
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 4 / 可测性 4。claim 与三处来源一致；硬数字只有内部 +39%，落地价值高，建议照抄 JSON 特性清单设计并自行 A/B。
+- **测试设计**：对照组纯上下文压缩（compaction），实验组加文件型 memory tool（CRUD）并强制每完成里程碑写 NOTES/任务文件、压缩后重读，比较长任务完成率、重复工具调用次数与跨窗口恢复后首步正确率
+- 备注：39% 来自官方内部评测、基线未公开；记忆文件本身也占 token，长度失控会变成第二上下文窗口（context rot 同样适用于它）
+
+#### S007 · 文件系统作为外置记忆与共享黑板：可恢复压缩 + append-only + todo 重述 + KV-cache 友好
+
+- **大类/来源**：记忆｜[Manus 团队博客《Context Engineering for AI Agents: Lessons from Building Manus》；思想源头为 MemGPT（arXiv 2310.08560）](https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：压缩必须『可恢复』：丢弃网页内容前保留 URL、丢弃文档前保留沙箱路径，需要时重取即可复原——文件系统是无限、持久、agent 可直接操作的外部上下文 ｜ 〔并集·Manus todo 重述〕典型 Manus 任务约 50 次工具调用；agent 反复重写 todo.md 并把剩余步骤追加到上下文末尾，使目标始终处于注意力最强的位置，缓解长任务目标漂移 ｜ 〔并集·Manus KV-cache append-only〕把 KV-cache 命中率当作生产 agent 第一指标：Claude Sonnet 缓存输入 0.30 USD/MTok vs 未缓存 3 USD/MTok（10 倍价差），而 Manus 输入:输出比约 100:1——前缀一旦变化整段重算，成本直接放大 10 倍 ｜ 〔并集·Manus 共享黑板(多agent)〕「把文件系统当作终极上下文」（体量近乎无限、天然持久、可被 agent 直接操作），压缩必须可逆（丢网页内容留 URL、丢文档留路径）；持续重写 todo.md 是注意力机制——把目标复述到上下文末尾对抗 lost-in-the-middle；KV-cache 命中率是生产第一指标：agent 输入输出比约 100:1，缓存 token 价差可达 10 倍，因此上下文必须 append-only、prompt 前缀稳定。
+- **证据**：官方工程博客经验（无对照数字）；MemGPT 论文（arXiv 2310.08560）定性演示 OS 式『主存-外存』分页使文档分析与多会话聊天超越单窗口限制（本次仅核验摘要页，未提取其实验数字） ｜ 〔并集·Manus todo 重述〕经验之谈（官方工程博客，无对照数字）：50 次工具调用为典型量级，收益归因于对抗 lost-in-the-middle 式注意力稀释 ｜ 〔并集·Manus KV-cache append-only〕官方工程博客披露的定价差与 100:1 输入输出比（工程经验+定价事实）；配套做法：prompt 前缀禁放时间戳、上下文只追加不回写、序列化确定性、显式 cache 断点；运行中动态增删工具表也会破坏缓存，Manus 改用 logits 掩码控制工具可用性（Auto/Required/Specified 三态） ｜ 〔并集·Manus 共享黑板(多agent)〕官方工程博客经验总结（无对照实验数字）：典型任务约 50 次工具调用；缓存价差以 Claude Sonnet 定价举例；对运行中增删工具定义会击穿 KV-cache 并使模型困惑给出机制解释，改用 logits 掩码控制行为。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 4 / 可测性 4。claim 忠实于来源但来源本身零实证；机制（append-only、todo 重述、可恢复压缩）便宜易测，值得进 A/B 队列但证据等级只够 B。
+- **测试设计**：对照组压缩时直接丢弃旧工具输出；实验组丢弃前把原文写入工作区文件并留指针，比较『需要回看』场景的重取成功率、重取延迟与总成本
+- 备注：外置引入重取延迟与文件管理复杂度，agent 可能忘记去取；与 memory tool 条目互补：一个管决策记忆，一个管原始观测 ｜ 〔并集·Manus todo 重述〕重述本身消耗 token，且与压缩机制有交互（压缩后必须重建 todo 才能续命）；无公开基准验证收益幅度 ｜ 〔并集·Manus KV-cache append-only〕摘要式压缩天然破坏缓存；OpenHands 选择在阈值处一次性压缩以换取后续线性成本，二者是同一权衡的两端；两家均为工程经验、无公开基准 ｜ 〔并集·Manus 共享黑板(多agent)〕经验之谈，无对照数字；黑板文件会成写冲突瓶颈，需加锁/分片；社区流传的「信息保真度提升 62%」等数字无法溯源，未采信；Anthropic《Effective context engineering for AI agents》（NOTES.md 结构化笔记、文件记忆工具）与 MetaGPT 共享消息池为同思想变体。
+
+#### S018 · Claude Code 分层记忆文件（CLAUDE.md 四层层级 + path-scoped rules 按需装载 + @import 递归 + monorepo 排除）
+
+- **大类/来源**：记忆｜[Claude Code 官方文档（Memory 页）](https://code.claude.com/docs/en/memory)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：分层记忆：企业级/用户级(~/.claude/CLAUDE.md)/项目级(./CLAUDE.md，入版本控制)/本地级(CLAUDE.local.md) 按序加载；按路径 glob 触发的 .claude/rules/（命中匹配文件读写时才装载）；@import 递归引入（最多四跳）；monorepo 用 claudeMdExcludes 排除无关团队文件。官方建议每个 CLAUDE.md 控制在 200 行内，称「Longer files consume more context and reduce adherence」
+- **证据**：官方文档机制 + 可核验阈值，无基准数字，属官方经验：MEMORY.md/CLAUDE.md 建议每文件 ≤200 行、超 4MiB 完全跳过；.claude/rules/ 支持 paths frontmatter 按路径作用域加载（一条 rule 的 paths 列表共享 1,000 个展开 pattern / 4MiB 预算，超预算按未展开字面量处理且匹配不到文件）；@path 导入最多递归 4 层且不省上下文（被导入文件同样启动时载入）；加载顺序为从文件系统根到工作目录依次拼接（非覆盖），子目录 CLAUDE.md 首次读写该目录文件时才装载；HTML 注释注入前剥离；auto memory 存 ~/.claude/projects/<project>/memory/ 且同仓库所有 worktree 共享
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 4 / 可测性 4。机制描述全部属实但零实证；分层记忆+path-scoped rules 对 monorepo 有明确工程价值，A/B 成本低，值得自测而非直接采信。
+- **测试设计**：A/B 三臂：全部规范塞单个长 CLAUDE.md vs 分层 CLAUDE.md（根文件 200 行内 + 目录级 path-scoped rules） vs 全量装载；同批真实仓库任务比较指令遵循率（用可自动判定的规则探针）、单轮 input token 与长任务后半程规则遗忘率
+- 备注：无任何对照评测数字，属官方经验建议；社区常见失败模式是 CLAUDE.md 堆料过长反而稀释关键指令（第三方建议 ≤150 行、官方建议 ≤200 行，均无实验支撑）。官方明确 CLAUDE.md 不是硬约束（以 user message 注入而非 system prompt，'no guarantee of strict compliance'），硬约束须用 PreToolUse hook；两份规则矛盾时「Claude may pick one arbitrarily」——记忆膨胀直接转成行为不确定性；auto memory 的 project 类笔记随代码演进过期后会误导 agent，需清理机制
+
+#### S019 · AGENTS.md 开放标准（agent 的 README）+ harness 默认自动发现并全量进系统提示
+
+- **大类/来源**：记忆｜[agents.md 官网（OpenAI Codex 等共同推动，现由 Linux 基金会旗下 Agentic AI Foundation 维护）+ OpenHands 官方文档与 AgentConfig 默认值](https://agents.md)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：为 agent 提供专门、可预测的项目上下文位置（构建步骤、测试命令、代码风格）；超过 60,000 个开源项目采用；monorepo 可嵌套，'离被编辑文件最近的 AGENTS.md 获胜'；OpenHands 默认识别仓库根 AGENTS.md（也识别 CLAUDE.md/GEMINI.md）并把全文放进系统提示（enable_prompt_extensions 默认 True），用户零配置
+- **证据**：官网（本次已核实）：60k+ 项目（GitHub 代码搜索统计）；Codex、Jules、Cursor、Devin、GitHub Copilot、Gemini CLI 等采用；嵌套优先级规则明确，OpenAI 主仓库含 88 个嵌套 AGENTS.md；页面无任何性能基准数据。OpenHands 侧（官方 skills/repo 文档 + openhands-ai==0.39.0 代码取证 core/config/agent_config.py:29）：'Full content is included in the initial system prompt'，属机制事实，无独立基准数字
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 4 / 可测性 5。标准采用度与 OpenHands 自动注入机制均属实（版本细节需微调），是产线上最廉价的可控变量，价值靠自测兑现。
+- **测试设计**：同一大仓库任务集：对照组仅给 README/不注入，实验组注入人工编写的 AGENTS.md（含正确构建/测试命令），比较首步试错步数、构建/测试命令首次执行成功率与环境踩坑次数
+- 备注：纯约定机制，无对照数据支撑有效性；写错或过期的命令会稳定误导所有会话（静态记忆无失效检测），建议将其中命令纳入 CI 定期校验，产线上需要生成-校验流水线而非一次性人工编写；本质是'用仓库文件代替跨会话记忆'，与动态记忆机制正交可叠加；修正建议：将 evidence 中 OpenHands 部分的表述精确化为：『enable_prompt_extensions 默认 True 已在 openhands-ai==0.39.0 代码确认；AGENTS.md/CLAUDE.md/GEMINI.md 自动识别并全文注入系统提示见当前 SDK 文档（load_project_skills / <REPO_CONTEXT>），0.39.0 版仅支持 .openhands/microagents/repo.md』。
+
+#### S020 · Mem0 可扩展长期记忆层（抽取-更新双阶段 + 检索）
+
+- **大类/来源**：记忆｜[Mem0 论文（arXiv 2504.19413）](https://arxiv.org/abs/2504.19413)｜证据等级：benchmark｜定级：**C**
+- **承诺改进**：LOCOMO 基准上 LLM-as-a-Judge 准确率相对 OpenAI 记忆方案 +26%；p95 延迟降低 91%；相对全上下文方法 token 节省 >90%；图变体 Mem0-g 较基础版高约 2%
+- **证据**：arXiv 摘要（本次已核实）：LOCOMO 基准，对比六类基线（RAG 各配置、全上下文、开源/专有记忆平台）；+26%（LLM-as-a-Judge）、91% p95 延迟降低、>90% token 节省
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 2 / 可测性 3。数字真实但域外证据+编码域垫底反例+跨厂商数字互斥，对编码产线预期价值低，不建议优先落地。
+- **测试设计**：在自研产线用跨会话任务组 A/B：无记忆 vs Mem0 式记忆层，重点测二跳任务（需用到前会话结论）的成功率与检索命中率
+- 备注：厂商自评；LOCOMO 是长对话 QA 不是编码基准；Zep 公开质疑 Mem0 对 Zep 基线配置不当，Letta 亦声明无法复现 Mem0 报告的 MemGPT 数字——跨厂商对比数字互斥需谨慎；在 SWE-ContextBench 编码复用评测中垫底是重要反例
+
+#### S021 · Letta Filesystem：纯文件系统 + grep 工具即记忆
+
+- **大类/来源**：记忆｜[Letta 官方博客：Benchmarking AI Agent Memory](https://www.letta.com/blog/benchmarking-ai-agent-memory)｜证据等级：benchmark｜定级：**B**
+- **承诺改进**：仅把对话历史存文件挂给 agent（grep/search_files/open/close 工具），GPT-4o mini 在 LoCoMo 得 74.0%，高于 Mem0 公开报告的最强图变体 68.5%
+- **证据**：官方博客（本次已核实）：LoCoMo、GPT-4o mini（为对齐 Mem0 实验设置）、文件自动解析嵌入支持语义搜索、少量 prompt 调优；工具调用模式用 tool rules 约束（非完全自主）；博客同时质疑 Mem0 的 MemGPT 基线不可复现；核心结论：LoCoMo 类基准主要测检索，agent 用工具的能力比记忆基建形态更重要
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 3 / 可测性 4。『markdown 文件 + grep 即记忆』方向与 Anthropic memory tool 互证，零基建易 A/B；但数字来自利益相关方且非编码域，须自测。
+- **测试设计**：A/B：自建记忆服务（向量/图谱）vs 纯 markdown 文件 + grep/search 工具，同批跨会话编码任务比较分辨率、成本与延迟
+- 备注：厂商自评且与 Mem0/Zep 有公开口水战，三方数字互斥；其实验用 tool rules 限制调用序列，非完全自主设定；'简单文件够用'结论与其自身产品路线一致，存在立场偏置，但方向与 Anthropic memory tool（也是文件）相互印证
+
+#### S023 · ReasoningBank + MaTTS：成败皆取的推理记忆与记忆感知测试时扩算
+
+- **大类/来源**：记忆｜[ReasoningBank 论文（arXiv 2509.25140，Google，ICLR 2026）](https://arxiv.org/abs/2509.25140)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：WebArena SR：Gemini-2.5-flash 40.5→48.8、pro 46.7→53.9（相对最高 +20%）；SWE-Bench-Verified：flash 34.2→38.8、pro 54.0→57.4；交互步数最多 -16%；MaTTS 并行扩算再加成（49.7→55.1）；消融：成败都存比仅存成功 +3.2（49.7 vs 46.5），而 AWM 加失败数据反降（44.4→42.2）
+- **证据**：arXiv HTML 全文（本次已核实）：记忆条目=标题+描述+从成功与失败中提炼的推理策略；检索注入 + 新经验写回；MaTTS 用并行/顺序扩算产生更丰富的对比信号合成更高质量记忆；含 SWE-Bench-Verified 编码评测
+- **K3 验证结论**：链接有效；claim 一致；证据强度 5 / 大型仓库价值 4 / 可测性 4。同行评审+编码基准+关键消融（失败轨迹的价值依赖抽取设计）全部核实，是经验复用策略的最强公开证据。
+- **测试设计**：A/B：无记忆 vs ReasoningBank 式条目库；再加消融组：仅存成功 vs 成败都存，验证失败信号在本产线的净价值
+- 备注：失败信号只在抽取 prompt 设计得当时才有正收益，基线方法（Synapse/AWM）加失败数据收益甚微或退化；编码域收益（+4.6/+3.4）小于 web 域（+8.3/+7.2），别按 web 数字定预期；记忆膨胀后需淘汰机制
+
+#### S024 · SWE-ContextBench：编码经验复用的受控评测（正面与负面证据）
+
+- **大类/来源**：记忆｜[SWE-ContextBench 论文（arXiv 2602.08316）](https://arxiv.org/abs/2602.08316)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：Oracle 摘要上下文使 resolved 26.26%→34.34%（+8.1 点）；自主（free）检索完整轨迹零提升且成本 +27.3%；选错摘要反而 -4 点（22.22%）；摘要均长 217 tokens vs 全轨迹 25,634 tokens；记忆框架实测：Supermemory 30.30% > OpenViking 29.20% > Mem0 24.24%
+- **⚠ 勘误（K3 对照原文，以下口径为准）**：「自主检索成本 +27.3%」的比较基准是 Oracle Context Learning 臂（$0.98 vs $0.77），非 No-Context 基线（$0.79，约 +24%）；claim 未指明基准，易误读。
+- **证据**：arXiv HTML 全文（本次已核实）：基于 SWE-Bench Lite/Multilingual/Verified 共 1,476 任务、51 仓库、9 语言；1,100 经验任务轨迹构成不过滤的 context pool（含失败轨迹，模拟真实环境）+ 376 引用关联任务；Claude Sonnet 4.5 四象限实验（oracle/free × 全轨迹/摘要）与检索匹配率分析
+- **K3 验证结论**：链接有效；claim 不一致；证据强度 4 / 大型仓库价值 5 / 可测性 4。最贴近大仓经验复用的受控证据，数字基本全部吻合（仅一处成本对比基准表述含糊）；『紧凑+选对才有益』可直接照搬做产线实验。
+- **测试设计**：直接照搬其设计：经验池不过滤，比较 oracle/自主检索 × 全轨迹/摘要 四象限，再用自家检索器对照 Supermemory/OpenViking 基线
+- 备注：核心负面证据：当前自主检索几乎不工作（top-1 匹配率仅 18–36%，free 检索最高还拉进 13.7 万 token 上下文），无过滤注入反而烧钱；'检索之外还要学会何时信任与如何改写检索到的上下文'是开放问题；预印本（2026-02 v1 / 2026-05 v3），同行评审状态未确认；核验问题：arXiv:2602.08316（v3）HTML 全文核实：oracle 摘要 26.26%→34.34%、free 全轨迹零提升、选错摘要降至 22.22%、摘要均长 217.1 vs 全轨迹 25,633.7 tokens、Supermemory 30.30% > OpenViking 29.20% > Mem0 24.24%、1,476 任务/51 仓库/9 语言/1,100+376 任务、Claude Sonnet 4.5、free top-1 匹配率 18.18%–36.36%、free 全轨迹平均拉入 136,907 tokens——均吻合。唯一不严谨处：claim 的『成本 +27.3%』在原文中是 Free Context Learning($0.98) 相对 Oracle Context Learning($0.77) 的增幅；相对 No-Context 基线($0.79；修正建议：将 claim 中『自主（free）检索完整轨迹零提升且成本 +27.3%』改为『自主（free）检索完整轨迹零提升，且成本较 oracle 上下文条件高 27.3%（$0.98 vs $0.77；较无上下文基线 $0.79 高约 24%）』。
+
+#### S025 · STALE：过期记忆基准（记忆失效与污染的负面证据）
+
+- **大类/来源**：记忆｜[STALE 论文（arXiv 2605.06527）](https://arxiv.org/abs/2605.06527)｜证据等级：benchmark｜定级：**B**
+- **承诺改进**：400 个专家验证的冲突场景、1,200 查询、上下文最长 150K tokens；最佳模型整体准确率仅 55.2%；核心失败模式 Implicit Conflict：新观察隐式使旧记忆失效，模型既难识别也难据此行动
+- **证据**：arXiv abs 页（本次已核实）：三探测维度（State Resolution / Premise Resistance / Implicit Policy Adaptation）；发现'检索到更新证据'与'据此行动'之间存在普遍鸿沟；模型常接受查询中嵌入的过时预设；提出 CUPMem 原型（写入时结构化状态整合 + 传播感知搜索）作为初步基线
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 3 / 可测性 3。记忆失效的负面证据扎实，是所有记忆策略的守门测试设计来源；但对话域迁移到编码需自建基准，落地工作量中等。
+- **测试设计**：自建'记忆过期'测试集：先让 agent 在旧版本仓库积累经验，再对重构后同仓库任务 A/B：带失效检测（时间戳+传播失效）vs 裸记忆，测任务失败率与错误复用率
+- 备注：以负面证据为主体：即使检索到新证据，模型仍常按旧记忆行动；CUPMem 只是初步原型、无完整消融数字；场景为对话域，编码域等价基准缺失需自建
+
+#### S027 · 把可复用知识包（skill）以「带明确输入-输出契约的 subagent」执行，而不是加载进主上下文
+
+- **大类/来源**：技能与插件｜[Subagents vs Agent Skills: Executing Reusable Knowledge for Long-Horizon Agentic Tasks (arXiv 2609.09233)](https://arxiv.org/abs/2609.09233)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：在长时程任务中，把 skill 包交给独立 context 的 subagent 执行，可在上下文过载时优于'把 skill 指令塞进主上下文'的 skill 执行；强模型下 subagent 执行在超过 80% 的任务上降低峰值上下文长度
+- **证据**：论文结论：'subagent execution performs better and degrades more gracefully than agent skill execution as initial context scales'；'for the stronger models, such as GPT 5.3 Codex and Kimi K2.6, subagents lower peak context length on over 80% of tasks'；机制为 'subagent execution thus trades a higher total token count for reduced peak context length'，且 'subagent execution consumes substantially more tokens overall'。基准为 SkillsBench（87 个长时程 agentic 任务），并从成功轨迹合成 64/87 个带契约的 skill 包
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 4。契约化 skill 交由 subagent 执行的收益-代价结构被完整核实；『契约是前提、总 token 更高』两个约束对产线设计直接有用。
+- **测试设计**：同一批大仓库任务 + 同一组 skill 包，做 2×2：{skill 加载进主上下文, skill 交由 subagent} × {人工写 skill, 契约化 skill}，比较成功率与峰值上下文长度
+- 备注：重要负面结果：用 SkillsBench 原有人工 skill（缺输入-输出契约）时，'agent skills match or outperform subagents across all models'，即契约是前提；且 subagent 方式总 token 明显更高，通信开销不可忽略。论文自陈局限：只覆盖一组基准，通用问题仍开放
+
+#### S030 · 长时程状态外置：initializer 会话搭骨架（init.sh + 进度文件 + 特性清单 + 初始提交），后续会话增量推进
+
+- **大类/来源**：记忆｜[Anthropic Engineering — Effective harnesses for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：让 agent 跨多个 context window 持续推进的关键不是更强的压缩，而是把工作状态外置成文件系统上的制品（进度文件、git 历史、特性清单、init 脚本），并让每个会话只做增量
+- **证据**：文中描述两种失败模式：'the agent tended to try to do too much at once—essentially to attempt to one-shot the app'（会话中途耗尽上下文，下一会话面对半成品）与 'a later agent instance would look around, see that progress had been made, and declare the job done'（过早宣布完成）。对策：首个会话为 initializer agent，产出 init.sh、claude-progress.txt（进度日志）、初始 git commit；后续会话先读进度文件与 git log、跑一遍基础 e2e 测试再动手，结束时提交 git 并写进度更新；initializer 还把需求展开成特性清单（claude.ai clone 案例中 200+ 个特性，初始全标 failing）作为完成度判据
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 5 / 可测性 4。与黑灯工厂长时程场景最贴合的工程实践（状态外置+增量会话+特性清单判据），细节全部属实；有效性须靠自家 A/B 兑现。
+- **测试设计**：对照组=仅靠 compaction 摘要跨窗口续作；实验组=加入 initializer 制品（进度文件+特性清单+init 脚本+每轮提交）；在需要多窗口的同一批大仓库任务上比较最终完成度、返工率与提前宣布完成的比例
+- 备注：官方工程博客，无受控对照与量化通过率（故记 anecdotal）。作者自陈关键开放问题：'it's still unclear whether a single, general-purpose coding agent performs best across contexts, or if better performance can be achieved through a multi-agent architecture'；文中所谓多个 agent 仅是不同初始 prompt，模型/工具/框架相同
+
+#### S048 · SKILL.md 三层渐进披露（name/description 常驻，正文按需读，附件再按需读）
+
+- **大类/来源**：技能与插件｜[Anthropic Engineering《Equipping agents for the real world with Agent Skills》(2025-10-16) + Agent Skills 开放标准](https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：技能是装指令/脚本/资源的目录；启动时只把每个技能的 name+description 预载进系统提示（第一层），模型判断相关才读全文 SKILL.md（第二层），正文里再引用的 reference/scripts/assets 才是第三层。官方称「可打包进技能里的上下文实际上是无界的」，且技能可携带可执行代码以获得确定性（例：PDF 技能里的 Python 脚本读表单字段，脚本与 PDF 都不必进上下文）。
+- **证据**：官方工程博客的机制说明与工作流示意（Claude 用 Bash 读 pdf/SKILL.md，再按需读 forms.md）；agentskills.io 规范同步为 Discovery→Activation→Execution 三阶段。原文未给出任何基准分数或 token 节省百分比——只给定性承诺，属官方经验。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 4 / 可测性 4。机制描述与官方原文完全一致但纯属定性承诺，无实证数字；A/B 设计可行，定 B。
+- **测试设计**：对照组把同等知识全量写进系统提示，实验组改为技能（只保留 name+description 常驻、正文按需读），在同一批大型仓库 issue 任务上比 pass rate 与总 input token；再补一组「实验组 + 强制正文预载」以隔离 token 与摆放位置两个变量。
+- 备注：无官方数字支撑；收益完全取决于技能选择/触发是否可靠（见后文路由崩塌与技能反向伤害的负面证据）。技能内携带可执行代码这一分支可回溯到 Voyager（arXiv:2305.16291，Minecraft 黑盒 GPT-4）：可执行代码技能库 + 自动课程 + 带环境反馈与自校验的迭代提示构成持续学习闭环，获得 3.3 倍更多独特物品、行走距离 2.3 倍、科技树里程碑最多快 15.3 倍，并能带进全新世界从零解决新任务——但该数字来自 Minecraft，不可直接外推到编码任务。官方同页明确警告：安装不可信技能等于给 agent 装新能力与供应链风险，需审计文件与脚本依赖。
+
+#### S049 · 给技能清单设「每轮固定预算」并显式度量未使用技能的成本
+
+- **大类/来源**：技能与插件｜[Claude Code 官方文档 Skills（含 Troubleshooting / Find unused skills / Skill descriptions are cut short）](https://docs.claude.com/en/docs/claude-code/skills)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：Claude Code 把所有技能的 name+description 做成清单注入每一轮，上下文预算按「模型上下文窗口的 1%」计（skillListingBudgetFraction 可调，如 0.02）；超预算时按「最少被调用的技能优先」丢掉 description，只保留 name；单条 description+when_to_use 文本硬截断在 1,536 字符（skillListingMaxDescChars 可配）。/skill-doctor 用来统计每个技能的上下文成本与被调用频次。
+- **证据**：文档原文：「Every skill in the skill listing adds to your context on every turn, whether or not Claude ever uses it」「The budget scales at 1% of the model's context window」「drops descriptions starting with the skills you invoke least」「capped at 1,536 characters」。均为产品文档中的配置事实与故障模式说明，不是对照实验，故记为经验证据。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 4 / 可测性 5。文档配置事实逐字核实无误，是现成的预算分配与故障清单，但无效果实证，定 B。
+- **测试设计**：实验组固定技能清单预算（1% / 2% / 无上限三档）× 每轮都注入全清单；对照组改为外部检索后按任务注入 top-k 技能；比较 pass rate、input token、以及「该触发却没触发」的失败率。
+- 备注：同页列出的官方故障模式可直接当我们的失效清单：不触发（描述没含用户会说的关键词 / frontmatter YAML 解析失败导致元数据为空、技能正文仍能加载但模型无法匹配）、触发过频（描述过宽，应加 disable-model-invocation: true）、中途不遵守（该规则应移到 hook；压缩后技能正文会被截断，要放最关键内容在顶部）。；修正建议：link 更新为 https://code.claude.com/docs/en/skills（旧域已 301 重定向）。
+
+#### S050 · 渐进披露 vs 扁平单文件：只有当支撑资源可执行时才赚
+
+- **大类/来源**：技能与插件｜[arXiv: SkillJuror: Measuring How Agent Skill Organization Changes Runtime Behavior (2026-06)](https://arxiv.org/abs/2606.11543)｜证据等级：ablation｜定级：**B**
+- **承诺改进**：在固定任务知识、只改技能组织方式的受控对比中，渐进披露（根文件 + 按需引用的支撑资源）比归一化的扁平单文件技能带来更多通过验证的 trial；收益来自 agent 真的去读了更多不同资源，而不是呈现方式本身好看。
+- **证据**：82 个 SkillsBench 任务、配对多次 trial（共 410 个 matched trials）：每条轨迹上被触及的不同技能资源数 1.18 → 3.85，有效 uptake 事件 1.33 → 3.92；verifier 通过的 trial 增加 17 个，即 +4.1%。论文明确：渐进披露在「支撑资源用于指导实现、检查或修复」时有效，但在「成败取决于精确输出约定、数值阈值或长产物生成流水线」时更弱。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 3 / 可测性 4。受控对比数字全部吻合但效应小（+4.1%）且任务依赖，需自研复现后再立项，定 B。
+- **测试设计**：同一批仓库任务、同一技能内容，把每个技能随机分配为「扁平单文件」或「根文件+分片资源」两种布局，配对多次运行，比较 pass rate 与资源触及次数。
+- 备注：单篇 2026-06 预印本、未列会议；+4.1% 属于小效应，410 个 trial 的量级下需在我们自己的任务集上复现才能立项。论文自述收益「task-dependent」，不要当成普适增益。
+
+#### S051 · 技能库到几十上百个量级时，把「选技能」从模型隐式路由改成 harness 侧显式预选
+
+- **大类/来源**：技能与插件｜[arXiv: Lost in Implicit Routing: How LLM Agents Fail to Load Relevant Skills at Scale (2026-10)](https://arxiv.org/abs/2610.18522)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：固定 SkillsBench 任务与 golden skill、只往库里加无关技能，会出现 skill routing collapse：agent 加载的技能越来越少甚至完全不加载，尽管相关技能始终在库中；由同一库做显式预选则不受影响。根因是无关技能的 description 造成语义干扰，以及「选技能」和「做任务」争夺同一份决策注意力。
+- **证据**：加入 1,000 个无关技能后：loaded-skill recall 73.6% → 27.4%，zero-load rate 9.3% → 51.6%；同一库下显式预选仍保持 73.9% recall。只把无关技能的 description 遮蔽可基本恢复加载；但元数据完整时，即使显式要求 agent 先规划技能使用，recall 仍低于预选。作者也指出「加载其他技能（含 golden skill 的貌似替代项）」过于罕见，无法解释这一下降——排除了解释混淆。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 4。路由崩塌曲线数字精确命中且直接预言黑灯工厂大技能库的沉默失败模式，显式预选改造极易 A/B，定 A。
+- **测试设计**：对照组：模型隐式路由（系统提示里给全量 name+description）；实验组：harness 用 BM25+重排先选 top-k 再注入。扫描「无关技能数量 ∈ {0, 100, 1000}」三档，比较技能 recall、zero-load rate 与最终 pass rate。
+- 备注：训练/评测用的是 SkillsBench 而非大型代码仓库，需在我们的大仓任务上复现；论文本身也只覆盖了「加载率」与部分缓解手段，延迟与覆盖率代价只做了初步评估。
+
+#### S052 · 技能选择优先用传统 IR（BM25 + 小重排）而非 LLM 中介检索循环
+
+- **大类/来源**：技能与插件｜[arXiv: SkillSeek: Revisiting Agent Skill Retrieval at Marketplace Scale (2026-09)](https://arxiv.org/abs/2609.38822)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：在 marketplace 规模的技能库上，标准 IR 配方（BGE-base 双编码器 + 小 cross-encoder，以 MCP 暴露）与文献中「让 LLM 在决策循环里改写查询、精排候选」的做法达到实测持平，而后者每个任务都要付 LLM token。
+- **证据**：在 89 任务 SkillsBench 上做 pool×backbone×method 的 4×11 网格：纯 BM25 在 4 个设置中的 3 个上 pass rate 已不低于被改进的 LLM 循环，小 cross-encoder 补上第 4 个设置的差距；一阶段召回上限解释了这一模式；每 trial 总花费从 51.30 美元降到 27.54 美元（距「无技能」基线仅差 0.5 美元以内）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 4。会议接收论文、数字精确、成本与确定性双收益契合产线需求，定 A；需在自家工具域复现。
+- **测试设计**：同一批仓库任务，三组：模型隐式路由 / BM25+cross-encoder 检索预选 / LLM 中介检索循环；比 pass rate、每任务成本与召回，并单独统计「gold 技能是否被选中」。
+- 备注：论文自述结论限定在其 SkillsBench + OpenHands 组合内，作者明说 LLM 方案在确定性方法失效的场景仍有价值；成本数字（美元）是按其计价假设得出，不能直接套到我们的模型账单。
+
+#### S053 · 度量门控的技能增删：改动只在多次有/无该技能的重复对比中净增益才保留
+
+- **大类/来源**：技能与插件｜[arXiv: Cortex: Measurement-Gated Evolution and Pruning of Coding-Agent Skills and Rules (2026-10)](https://arxiv.org/abs/2610.14216)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：开发者凭「一次成功」往 harness 里加规则/技能是不可靠的，同一个 agent 这次过下次就挂。Cortex 把开发者会话里的修正录成可重放任务，归纳出反复出现的修正，每次只写一条技能或规则，只有在「多次有/无该条」的重复运行中显示净增益且没有任务明显变差时才保留；已有文本在删除前同样被这样测一遍。
+- **证据**：在 Claude Haiku 4.5 上于专用仓库（刻意设置模型常破坏的约定、一块无可学习区域）测：在留出任务上，所构建的 harness 让 agent 遵守约定的频率远高于「无技能无规则」组，可学习区之外保持不变，且没有引入每轮都读的文本。关键机制发现——自动加载的 rules 承担了大部分效果；skills 只有在与任务涉及的文件一起提供时才有用，「每轮都提供」的技能很少被打开。论文诚实给出负面结果：Cortex 没被植入的无用/有害建议确实一个都没留，但 agent 根本没打开那些无用技能、对有害 rule 也给不出结论，所以测试只证明「不保留未被使用的文本」，不证明「能发现损害」；在更强的 Claude Sonnet 5 上，单次运行构建的 harness 收益很小；在真实开源项目上（agent 很少被纠正）Cortex 什么都没学到。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 3。门禁判定规则与负面约束均被原文支持，正是产线文本资产治理所需；测试需 N 次配对运行基础设施，成本中等，定 A。
+- **测试设计**：对照组自由增删规则/技能；实验组每条候选文本只在 N≥3 次配对运行中净增益为正且无任务回退时才纳入，比较最终 pass rate 与常驻上下文 token。
+- 备注：论文自己给的三条负面结论必须照抄进我们的设计约束：强模型单次运行收益小、真实项目上「纠正样本稀疏」会让这套东西空转、且该门禁只保证「不留无用文本」不保证「能识别有害文本」——后者需要我们另配有害样本回归集。
+
+#### S124 · 多技能/计划资产按依赖 DAG + 阶段计划组织；技能注入可能在 1/3 任务上帮倒忙
+
+- **大类/来源**：技能与插件｜[论文《An Empirical Study of Agent Skills' Downstream Utility》；arXiv: An Empirical Study of Agent Skills' Downstream Utility (2026-10)](https://arxiv.org/abs/2610.08875)｜证据等级：benchmark｜定级：**B**
+- **承诺改进**：把下游效用定义为同任务同配置下相对 No-Skill 的通过率差：在 87 个 SkillsBench 任务、9 种配置上，同一批 Skills 在 36.78% 的任务上『帮倒忙』（随配置翻转）；按『对所需操作的支持度』重排候选可使首选通过率提升 4.35-5.80 个百分点；组织方式上『Stage Plan + Dependency DAG』优于仅按使用顺序，额外收益集中在提供 5-6 个 Skill 的任务。 ｜ 〔并集·技能下游效用实证(B分片)〕「技能与任务相关」并不等于「技能有用」：同一批技能在 9 种执行配置下，有的配置有帮助、有的配置有害；把候选技能按「对必需操作的支持度」重排能提升首选命中率；显式的 Stage Plan 与依赖 DAG 组织方式优于仅靠使用顺序。
+- **证据**：摘要引句：'The same Skills help some configurations and hurt others on 36.78% of tasks, with trajectories showing that recommended procedures can become an execution burden.' / 'reranking by support for required operations raises first-choice pass rates by 4.35--5.80 percentage points across the three configurations.' / 'Stage Plan and Dependency DAG outperform use order alone, with DAG's additional benefits concentrated in tasks supplied with five or six Skills.' ｜ 〔并集·技能下游效用实证(B分片)〕87 个 SkillsBench 任务，效用定义为同模型同 harness 下与 No-Skill 的 pass rate 差；在 36.78% 的任务上，同一批技能「帮了某些配置、伤了另一些配置」，轨迹显示被推荐的流程反而变成执行负担；相关性排序会漏掉更有用的候选；在评估的候选集内，按「对必需操作的支持度」重排使首选 pass rate 在 3 种配置上分别提升 4.35 与 5.80 个百分点；Stage Plan 与 Dependency DAG 均优于仅按使用顺序，DAG 的额外收益集中在提供 5~6 个技能的任务上。候选来自 37,596 个技能的精选语料。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 3 / 可测性 4。arXiv 2610.08875 摘要五项数字（87 任务、9 配置、36.78%、4.35–5.80pp、Stage Plan/DAG 优于使用顺序、37,596 技能语料）全部逐字吻合；『技能注入可能帮倒忙』的负面证据真实可靠，但非仓库级任务证据，定 B。
+- **测试设计**：对照组：按使用顺序注入；实验组：按依赖 DAG 组织 + 按操作支持度重排；固定 Skill 集合与模型，测首选通过率与整体通过率。
+- 备注：来自 SkillsBench（程序化任务）与通用 Skill 语料，对大型真实 C++/Java 仓库的迁移性需自行验证；『36.78% 任务上帮倒忙』是重要负面证据，技能/计划注入不能默认是正收益。 ｜ 〔并集·技能下游效用实证(B分片)〕证据任务集是 SkillsBench 而非大型代码仓库；「36.78% 任务上技能有正有负」这个数字口径是「同技能跨配置表现不一致」的任务占比，容易被误读为「36.78% 的技能有害」。
+
+#### S160 · SWE-Skills-Bench：先证明技能本身有没有边际收益（成对开/关 skill 的受控评测）
+
+- **大类/来源**：记忆/技能复用｜[SWE-Skills-Bench 论文（arXiv 2603.15401，2026-03-16）](https://arxiv.org/abs/2603.15401)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：技能注入对真实 SWE 任务的收益远低于普及速度：49 个公开技能里 39 个 pass rate 零提升，平均仅 +1.2%；token 开销从节省到 +451% 不等；只有 7 个专用技能有实质收益（最高 +30%），3 个因版本不匹配的指导与项目上下文冲突而劣化（最多 -10%）
+- **证据**：本次通过 arXiv API（export.arxiv.org/api/query, id_list=2603.15401）读取原文摘要核实：49 个公开 SWE 技能 × 钉在固定 commit 的真实 GitHub 仓库 × 带验收标准的需求文档，约 565 个任务实例，覆盖 6 个 SWE 子域；确定性验证框架把每条验收标准映射到可执行测试，支持「带 skill / 不带 skill」的配对评测。数字与上述 claim 一致，均取自摘要原文；未读全文，未核实其子域划分细节。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 5。唯一在钉 commit 真实仓库上隔离技能边际收益的公开基准，配对开/关设计天然就是准入门槛 A/B，直接采纳。
+- **测试设计**：同一批真实仓库任务做配对 A/B：对照组不注入技能（或注入随机填充技能），实验组注入目标技能，其余 harness 变量（模型、预算、工具集）完全一致，比较 pass rate、token 消耗与回归率三项同时看。
+- 备注：反面证据本身即结论：技能是窄干预，收益强依赖领域匹配、抽象层级与上下文兼容性。摘要给出的 GitHub 仓库 https://github.com/GeniusHTX/SWE-Skills-Bench 在本环境不可访问（curl 超时，见检索记录），未核实是否已公开代码。仓库规模仍是 GitHub 项目级别，未达 10 万文件量级。
+
+#### S161 · 规则/技能极性治理：只写负向约束（「不要重构无关代码」），不写正向指令（「遵循代码风格」）
+
+- **大类/来源**：记忆/技能复用｜[Guardrails Beat Guidance: A Large-Scale Study of Rules, Skills, and Persistent Configuration for Coding Agents（arXiv 2604.11088，2026-04-13）；Guardrails Beat Guidance: A Large-Scale Study of Rules, Skills, and Persistent Configuration for Coding Agents（arXiv 2604.11088v2, 2026-04-13）](https://arxiv.org/abs/2604.11088)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：随机规则与专家精编规则对 coding agent 的提升相当（两者均 +13.8pp，测于 SWE-bench Verified 的判别性子集）；收益基本与内容无关（打乱、错领域、错格式的规则文件都能追平精编规则，指向 context priming 机制）；单独看有益的规则全是负向约束，单独看有害的全是正向指令；规则条数从 0 到 50 时通过率保持稳定，个体有害规则在集合中不累积伤害 ｜ 〔并集·Guardrails 负向约束(gapfill3)〕首个关于 agent 规则文件的大规模对照研究：随机规则对 coding agent 任务表现的提升与专家精编规则几乎相同（在一个可判别子集上都是 +13.8pp）；每一条单独有益的规则都是负约束（「不要重构无关代码」），而每一条单独有害的都是正向指令（「遵循代码风格」）。
+- **证据**：本次通过 arXiv API（id_list=2604.11088）读取原文摘要核实：抓取 679 个规则文件（CLAUDE.md、.cursorrules 及 agent skills / plugin manifests / persona 定义家族），共 25,532 条规则；在 SWE-bench Verified 上跑 5,000+ 次 Claude Code（Claude Opus 4.6）对照实验。三个结论模式（极性、内容无关性、集合稳定性）均按摘要原文转述。 ｜ 〔并集·Guardrails 负向约束(gapfill3)〕抓取 GitHub 上 679 个规则文件（CLAUDE.md、.cursorrules 及更广的 agent skills / plugin manifests / persona 定义）共 25,532 条规则，用 Claude Code + Claude Opus 4.6 跑 SWE-bench Verified 做 5,000+ 次 agent 运行。三个模式：(i) 规则极性清晰区分有益与有害；(ii) 增益基本内容无关——随机、打乱、错域、未转换格式的规则文件都能匹配精编规则，指向 context priming 机制；(iii) 单条规则单独看可能有害，但集成后不累积伤害，pass rate 在 0 到 50 条规则之间保持稳定。作者结论：应约束 agent「不许做什么」，而不是规定「该做什么」。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 5。大规模受控研究，极性治理结论可直接落成 harness 规则审核规范；三臂 A/B 与剂量曲线极易实现。
+- **测试设计**：把仓库级规则集拆成三组做 3×N A/B：全负向约束 / 全正向指令 / 空规则；每组固定同一批任务与模型，比较 pass rate 与 token；同时做「规则条数 0/10/25/50」的剂量曲线验证集合稳定性。
+- 备注：关键反面证据：「收益与内容无关」意味着这套 +13.8pp 更像是 context priming 的存在性证明，不能被解读成「精心写技能有用」；同时它与 SWE-Skills-Bench（39/49 技能零收益）结论方向并不矛盾但侧重不同。实验只覆盖 SWE-bench Verified 判别子集与 Claude 一家闭源模型，跨模型/跨仓库规模未验证。 ｜ 〔并集·Guardrails 负向约束(gapfill3)〕反面证据就在论文自身：随机规则也涨 +13.8pp，说明「内容」可能不是真正的机制（是 context priming），所以「负约束更好」的因果解释尚不牢固；+13.8pp 是在「可判别子集」上测的而非全量 SWE-bench Verified；只覆盖 Claude Code + Opus 4.6 一个组合，迁移到多模型产线需复测；作者同时把社区自写规则/技能的膨胀点为「隐藏可靠性风险」。
+
+#### S162 · 仓库级技能的版本绑定与失效检测（release transition 维护任务）
+
+- **大类/来源**：记忆/技能复用｜[Repo2Skill-Evo: Repository Skills Go Stale in Silence（arXiv 2608.21964，2026-08-22）](https://arxiv.org/abs/2608.21964)｜证据等级：ablation→**benchmark**（K3 修正）｜定级：**A**
+- **承诺改进**：仓库技能会静默过期：57 个真实仓库、105 次选定的版本跃迁中，每一次都会让 V1 技能集的一部分失效；6 个前沿 agent 在「以官方 V1→V2 补丁为依据」的移除指标下，avg@3 macro F1 仅 29.9%–69.7%；两类相反错误主导结果——技能集未覆盖受影响文件导致残留过期内容，以及过度编辑导致召回高但精确率低 ｜ 〔并集·Repo2Skill-Evo(gapfill3)〕把每次 release 迁移当作一个技能维护任务：给定 V1 技能集与官方 V1→V2 补丁，agent 要更新过时内容、同时保留仍然有效的指导。在 57 个真实仓库、105 次精选 release 迁移中，每一次迁移都会让 V1 技能集的一部分失效；六个前沿 agent 的 avg@3 macro F1（patch-grounded removal 指标，兼顾陈旧内容召回与过度编辑精度）只有 29.9%–69.7%。
+- **证据**：本次通过 arXiv API（id_list=2608.21964）读取原文摘要核实：任务设定为给定 V1 技能集与官方 V1→V2 patch，让 agent 更新已过期的技能内容同时保留仍然有效的部分；评测用 patch-grounded removal metric（在过期内容召回与过度编辑精确率之间取平衡）。数字均取自摘要原文，未读全文。 ｜ 〔并集·Repo2Skill-Evo(gapfill3)〕论文摘要给出仓库数、迁移数、「每次都部分失效」这一结论与 F1 区间；两类方向相反的主导错误：对受影响文件覆盖不足 → 陈旧内容原地不动；编辑过宽 → 召回更高但精度更低。作者论点是「把知识外置成技能反而让衰减变得不可见」——技能不会报错、测试照样过。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 3。技能静默过期的负面证据量化扎实，是技能库长期资产化的必查项；落地检测需把 oracle 补丁换成可自动检查信号。
+- **测试设计**：构造「基线 vs 技能库」双跑：每 2 周给实验组推送一次技能库版本，对照组固定用首版技能库；比较同一批任务上的 pass rate 衰减曲线与 token 消耗，度量技能腐化的实际收益流失速度。
+- 备注：纯负面证据（可靠性风险），无正向缓解方法给出；作者未提供自动检测/修复方案。指标是 macro F1 而非端到端 pass rate，与黑灯工厂的最终指标存在间接性。仅覆盖 105 次版本跃迁，样本不大。 ｜ 〔并集·Repo2Skill-Evo(gapfill3)〕局限：论文测的是「更新技能」这个代理任务本身，不是端到端编码收益；用 oracle release 补丁做检测在真实场景拿不到，落地要换成「技能提到的 API/路径是否仍存在」这类可自动检查的信号。旁证：Context Rot（arXiv 2606.09090）用现成 README/wiki 一致性检查器扫 356 个仓库，23.0% 存在过时的代码元素引用；SWE-CC（arXiv 2610.06193）在 12 个开源仓库的 823 条可机检策略、500 个 SWE-bench Verified 扩展任务上发现，即使补丁功能正确，agent 仍违反 43.1% 的适用项目策略，且近一半违规发生在中间执行步骤。；修正建议：evidenceGrade 由 ablation 改为 benchmark。
+
+#### S163 · 开发者手写的抽象级技能 > agent 自动合成的轨迹级技能（成本侧证据）
+
+- **大类/来源**：记忆/技能复用｜[Analyzing and Mitigating Cost-Inefficient Behaviors in Coding Agents（arXiv 2609.30725，2026-09-25）](https://arxiv.org/abs/2609.30725)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：三类低效行为（subsumed retrieval、相似脚本重复生成、测试重复执行）影响 79.00%–98.00% 的编码任务，占任务成本最高 22.75%；缓解手段对比中，开发者设计的高层、与轨迹无关的技能把成本降低最多 41.73%，约为 agent 自合成技能最大收益的两倍；agent 自合成技能倾向产出低层、绑定具体轨迹的指导因而泛化差；结构感知检索反而引入检索开销并改变 agent 分派，导致成本最多上升 28.14%
+- **证据**：本次通过 arXiv API（id_list=2609.30725）读取原文摘要核实：先分析 Claude Code 与 Mini-SWE-Agent 在 SWE-bench Verified 上四种配置共 1,200 条轨迹识别三类行为，再在留出的 SWE-bench Verified 与 Pro 任务上以 10k+ 轨迹规模评估三种缓解策略（结构感知检索 / agent 合成技能 / 开发者设计技能）。全部数字照录摘要原文。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 4。成本侧消融直接否定「结构感知检索必省 token」的直觉，四臂 A/B 主指标清晰，单位经济性决策价值高。
+- **测试设计**：三臂 A/B（developer-designed skills / agent-synthesized skills / structure-aware retrieval 接入）+ 纯基线，四臂同任务同模型，主指标为「每成功任务的 token 与美元成本」，通过率作为约束指标而非优化目标。
+- 备注：反面证据：自建技能库的自动化流水线（agent 从轨迹合成技能）在本证据下收益减半甚至为负，提示黑灯工厂应优先投资人工/规则化的高层技能模板，而非全自动技能蒸馏。结论基于 Claude Code 与 Mini-SWE-agent 两种 harness，跨 harness 泛化性未验证。
+
+#### S177 · 技能修订必须「可自动检查」，且只有「新增旧技能没提到的命令/路径」的规则才兑现收益；同时把正文加载成本计费
+
+- **大类/来源**：技能与插件｜[Agent Skill Evolution: How Revisions Affect Coding Agents（arXiv 2610.04832, 2026-10-04）](https://arxiv.org/abs/2610.04832)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：从 3,159 个技能的 2,608 组首/末修订对中抽出可自动检查的规则增删（如「跑 allium check」），测量其对 21 个模型（单答）与 4 个 agent（沙箱）的影响：新增一条规则后单答合规率平均 +0.41；四个 agent 实际采取该动作的比例平均 +0.23（+0.16~+0.36）；三个被判分的 agent 最终正确率平均 +0.10（+0.06~+0.14）。收益主要来自「命名了旧技能没有的命令或路径」的规则。成本侧：一次修订给单答增加 18–19% input token，对一个 agent episode 没有可检测成本；但加载技能正文会把 episode token 抬高 50%。
+- **证据**：论文摘要给出全部数字与样本量；结构性发现：55% 的修订会改规则或流程；改技能的提交比同规模的其它提交更常同时改 CLAUDE.md 等 harness 文件。最关键的否定性发现：真实工具只在 agent 决定需要时才加载技能正文，在这种设置下四个 agent 只保留约 51% 的动作增益（三个开放模型只保留 38%）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 4。大样本测量（2,608 修订对×21 模型×4 agent）且数字基本全部吻合，一处范围表述需修正；「可自动检查+命名具体命令/路径」的规则筛选与触发率/正确率双指标设计可直接落地。
+- **测试设计**：对照组 = 修订前的技能版本；实验组 = 只加一条可自动检查规则的修订（且规则里命名具体命令或路径）；同 agent 同任务重复跑，同时比较「动作触发率」与「最终正确率」两个指标，外加 episode token 增量。
+- 备注：必须同时测触发率：论文实测「技能被读到但没被执行」会吃掉一半以上收益。另有冲突风险需一并防：One Skill Too Many（arXiv 2610.11647, 2026-10-08）从 20,947 个仓库快照挖出 822,109 对相似技能候选，LLM 判 3,754 对、确认 312 对，在 3 个模型上跑 6,368 次运行 / 169,294 次工具调用 / 542 agent 小时，发现近四分之一已安装技能与同职能技能共存，相似技能在五分之一的运行里顶替了原技能且任务仍判通过（只查通过率的基准会漏掉），在首次读取处加 pre-tool hook 可把独占核心功能的保真度恢复到「先读原技能」的水平。；修正建议：建议把 claim 改为「新增一条规则后，16 个开放权重模型的单答合规率平均 +0.41」。
+
+#### S178 · 上下文文件（AGENTS.md/CLAUDE.md）本身不保证正确性：把工程预算从「写文件」挪到「调优文件」
+
+- **大类/来源**：技能与插件（反面证据）｜[Do Context Files Help Coding Agents? A Two-Agent Ablation Study on Real Repositories（arXiv 2607.27250, 2026-07-28）](https://arxiv.org/abs/2607.27250)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：在两个前沿 agent（Claude Code、Codex）、3 个真实仓库、17 个真实任务（15 个共享 + 2 个 Codex 专属）、288 次带金标准测试的运行上做上下文注入策略消融：上下文策略在任何一个 agent 上都没有可测地移动正确性（等价性检验把效应上界压到 ≤10–15pp）；失败分诊显示 agent 失败在实现能力（功能设计、模式选择、精确接线），而不是缺上下文文件能补的仓库知识；一个操纵探针确认真实 AGENTS.md 在两个 agent 上都没能把「差一点」变成通过。
+- **证据**：论文摘要给出样本量、等价性检验界限与失败分诊结论；代码、数据与分析全部公开。论文还给出一个解释既有矛盾结论的候选原因：任务是否处在「接近阈值」的难度带是 agent 特定的（Spearman rho=0.75），所以单 agent 研究各自抽到了不同的信息带。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 5。严谨的两 agent 消融+等价性检验，负面结论表述克制准确；「把预算从写文件挪到调优文件/验证器」的资源配置含义与大仓场景直接相关。
+- **测试设计**：对照组 = 真实仓库的 AGENTS.md/CLAUDE.md 原样注入；实验组 = 同任务但移除上下文文件或替换成无关内容（随机/错域内容）；用等价性检验而非显著性检验设定可接受的最小效应，再比较 pass rate。
+- 备注：结论是「未测到效应」而非「证明无效应」（17 任务 × 3 仓库，偏小）。配套的 1,650 次 Claude Code CLI 会话、16,050 次函数级观测的因子研究（Instruction Adherence in Coding Agent Configuration Files, arXiv 2605.10039）同样没测到文件大小、指令位置、文件架构、邻接冲突这四个结构变量的可检测效应（size/conflict 的 BF10 在 0.05–0.10），只测到会话内效应（每多生成一个函数合规几率降约 5.6%，OR=0.944）。
+
+#### S179 · 用「探针-精炼」自动调优仓库指导文件：收益来自覆盖率（找到正确文件）而不是精度（把改动做对）
+
+- **大类/来源**：技能与插件｜[Probe-and-Refine Tuning of Repository Guidance for Coding Agents（arXiv 2606.20512v2, 2026-06-18）](https://arxiv.org/abs/2606.20512)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：用合成 bug-fix 探针迭代诊断并修补仓库的指导文件，整个调优过程只用单次 LLM 调用、不用 agent 循环也不用工具：SWE-bench Verified 上 Qwen3.5-35B-A3B、200 步、4 次独立试验，probe-and-refine 平均 resolve rate 33.0%，优于它初始化的静态知识库 28.3% 和无指导基线 25.5%（两个对比均 p<0.001）。
+- **证据**：论文摘要给出三个数字与显著性；机制结论：精炼后的指导让 agent 多覆盖 14.5pp 的「可产出补丁」实例，而每补丁精度统计上不变（~59%，p=0.119）——即改善来自「agent 找到正确的文件」，不是「改动质量变好」；步骤预算实验显示指导正是让更大 step budget 有意义的原因；跨模型实验（NVIDIA-Nemotron-3-Nano-30B-A3B）显示模型产不出足够诊断性输出时调优循环会退化。开源代码在 github.com/asashepard/probe-and-refine-tuning。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 4 / 可测性 4。数字与显著性全部吻合，且机制结论（收益来自覆盖率而非精度）有统计支持；单模型+合成探针限制外部效度，故证据强度 3。
+- **测试设计**：对照组 = 静态 AGENTS.md（人工或一次性 LLM 生成）；实验组 = 同一初始文件 + 探针-精炼循环（探针数与步数作为超参扫）；同模型同任务做 4 次独立试验比 resolve rate，并单独统计「定位到正确文件」与「补丁正确」两个指标以验证覆盖率机制。
+- 备注：局限：33.0% 的绝对值远低于 2026 年最强 harness；模型是 Qwen3.5-35B-A3B 单档位，跨模型鲁棒性只在更弱的 Nemotron-3-Nano-30B-A3B 上验证过（结果是退化）；探针是合成的 bug-fix，与真实 issue 分布的差异未量化。本条与上一条（上下文文件无可测收益）不矛盾，合起来的读法是：文件本身不解决问题，关键是文件怎么被生成与调优。
+
+#### S180 · 从仓库自身的历史提交蒸馏技能，并用「面向未来真实合并 PR」的多维有机性指标评测（不只测功能通过率）
+
+- **大类/来源**：技能与插件｜[Learning to Commit: Generating Organic Pull Requests via Online Repository Memory（arXiv 2603.26664, 2026-03-27）](https://arxiv.org/abs/2603.26664)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：严格时间切分下，agent 通过「盲做历史提交 → 与 oracle diff 对比 → 蒸馏成可复用技能」的 on-policy 循环积累仓库特定开发模式（代码风格与命名、内部 API 的存在与用法、隐式架构约束、维护者偏好），在真正未来、已合并的 PR 任务上：4 个条件中 3 个条件的 File IoU 更高，最大 +19pp（seq-all：80% vs 61%），同设定下工具调用少 21%（56.8 vs 71.9 步），两个独立裁判模型（Claude Opus 4.6、Gemini 3.1 Pro）给出的整体胜率 54%–58%。
+- **证据**：论文 §4：从 2,738 个非 merge 提交经程序化过滤 + LLM 评估筛出 386 个高质量提交（77.2% 适配率），分 7 个开发类别；时间切分出 24 个学习提交 + 7 个未来留出测试任务；四个条件 seq-all / seq-bycat / par-all / par-bycat 各跑 7 个任务。Table 2 逐行：seq-all 80%/61%、steps 56.8/71.9、line deviation 0.69/1.59；par-bycat 80%/68%、62.7/62.7、0.62/0.88；par-all 81%/72%、67.7/68.3、0.80/1.06；seq-bycat 71%/71%、75.0/76.4、1.22/1.13。Table 3 双裁判胜率（par-bycat 54%/57%、seq-all 55%/58%）；Table 4 分维度：优势集中在 Q2 逻辑相似 50% vs 25% 与 Q3 冗余幻觉 54% vs 41%，基线在 Q1 作用域对齐与 Q4 代码风格上略占优。评测协议是双裁判配对 A/B（scope alignment / logic similarity / redundancy-hallucination / code style 四维）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 4 / 可测性 3。表格数字逐格吻合，时间切分+oracle diff+未来真实 PR 的评测范式可复制；但 1 个私有仓库、7 个测试任务、含 LLM 裁判，证据规模小，落地需自建蒸馏管线。
+- **测试设计**：对照组 = 不带任何技能文档的同款 agent（同模型、同工具、同任务）；实验组 = 带从历史提交蒸馏出的技能文档；用未来留出的真实 PR 任务，配对双裁判在 scope/logic/redundancy/style 四维打分，主指标用 File IoU 与 line deviation 等确定性指标而不是只看测试是否通过。
+- 备注：最弱的地方是规模：只有 1 个内部仓库、7 个留出测试任务、24 个学习提交，且仓库非公开无法复现；评测含 LLM 裁判成分；技能只覆盖风格/内部 API/架构约束三类模式，未覆盖业务流程；论文自述扩展到公开 GitHub 仓库是「直接的下一步」。
+
+### 3.3 工具与接口（21 条，A 级 15 条）
+
+#### S035 · 长上下文不要塞进 prompt，改用 coding agent + 文件系统外部化处理（可编程检索替代语义检索）
+
+- **大类/来源**：工具与接口｜[Coding Agents are Effective Long-Context Processors (arXiv 2603.20432)](https://arxiv.org/abs/2603.20432)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：把长上下文处理外部化为'可执行交互'（agent 用原生工具在文件系统里组织与操作文本），在多个长上下文基准上比已发表 SOTA 平均高 17.3%
+- **证据**：摘要：'we study whether long-context processing can be externalized from latent attention into explicit, executable interactions, by allowing coding agents to organize text in file systems and manipulate it using its native tools'；'Across multiple benchmarks, these agents outperform published state-of-the-art by 17.3% on average'；语料规模 'up to three trillion tokens'；归因于 'native tool proficiency' 与 'file system familiarity'
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 4。arXiv:2603.20432 摘要核验：文件系统外部化、超出已发表 SOTA 平均 17.3%、语料至 3 万亿 token、归因 native tool proficiency/file system familiarity，全部吻合；与大仓库'用 grep/脚本算答案'的路线同构，对照臂（预填长上下文 vs 文件工具）实现简单。
+- **测试设计**：对照组=直接长上下文（预填大段仓库内容）；实验组=agent 用文件工具分页检索与脚本过滤；在大仓库理解/修复任务上比较正确率、token 与耗时
+- 备注：评测为长上下文推理/RAG/开放域 QA 类任务，非仓库修复端到端；论文使用的是现成前沿 agent，收益与模型的文件系统熟练度强相关，换模型需重测
+
+#### S042 · hooks 生命周期门禁矩阵：PreToolUse 阻断 / PostToolUse 回注 / Stop 拦截收尾 / SubagentStart-Stop / TeammateIdle / TaskCompleted
+
+- **大类/来源**：工具与接口｜[Claude Code 官方文档《Hooks》](https://code.claude.com/docs/en/hooks)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：hooks 是一张覆盖完整生命周期的确定性拦截网：PreToolUse 在工具执行前阻断、PostToolUse 在成功后回注上下文、PostToolUseFailure 在失败后回注、Stop/SubagentStop 拦截「这一轮结束」、SubagentStart/SubagentStop 可按 agent 类型 matcher 精确挂到某个子 agent 上、TeammateIdle/TaskCreated/TaskCompleted 给多 agent 团队当质量闸门。统一控制协议是 exit code 2 = 阻断并把 stderr 回喂给模型，exit code 0 = hook 不做决定、走正常权限流程〔K3 勘误：0 并非主动「通过」〕，另有 JSON decision 通道
+- **⚠ 勘误（K3 对照原文，已就地改正）**：「exit code 0 = 通过」语义不准——准确语义是「hook 不做决定，走正常权限流程」，已就地改正。
+- **证据**：文档机制，无数字，属官方经验。docs/hooks.txt:11 给出事件表（PreToolUse/PostToolUse/PostToolUseFailure/SubagentStart/SubagentStop/Stop/PostToolBatch/PermissionRequest/PreCompact/PreModelSwitch/SessionEnd 等）；docs/hooks.txt:579 给出逐事件退出码语义表，其中 Stop/TeammateIdle/TaskCompleted 的 exit 2 会阻断动作并回送 stderr、JSON {"continue": false, "stopReason": …} 可整体停掉，TaskCreated 的 exit 2 直接取消任务创建；docs/sub-agents.txt:336-364 给出用 PreToolUse + jq 解析 tool_input.command 实现「只允许 SELECT」的完整可运行范例（脚本必须 chmod +x，否则不阻断）。另 docs/hooks.txt:205 记录默认超时：command/http/mcp_tool 600s、prompt 30s、agent 60s
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 5 / 可测性 4。线上 hooks 文档核实：事件表含全部所列事件（PreToolUse/PostToolUse/PostToolUseFailure/SubagentStart/SubagentStop/Stop/PostToolBatch/PermissionRequest/PreCompact/PreModelSwitch/SessionEnd/TeammateIdle/TaskCreated/TaskCompleted）、exit 2 阻断+stderr 回喂、JSON continue/stopReason 通道、Stop/TeammateIdle/TaskCompleted 的 exit 2 语义、TaskCreated exit 2 回滚任务创建、默认超时 600/30/60s，全部吻合；硬约束落点是黑灯工厂唯一可靠的规则下发位，定 B（无实证数字）。
+- **测试设计**：对照：同样规则只写在 CLAUDE.md（软约束）；实验组：同样规则落成 PreToolUse/Stop hook（硬约束），CLAUDE.md 里不写。比较违规写入/违规收尾次数、pass rate、以及任务平均耗时（hook 有开销，会暴露真实的时间成本）
+- 备注：hook 是 harness 侧可执行进程，在并行产线里会同时跑几百份，成本与超时策略必须自己定；文档里的 600s 默认超时对批处理场景明显过长。官方另一条硬约束值得注意：子 agent 文件里写的前置 hooks 需要先信任该文件所在目录，未信任时静默跳过而子 agent 照常运行（docs/sub-agents.txt:383-384）——这类「静默降级」在评测里会把 hook 组装成无效对照；修正建议：把 'exit code 0 = 通过' 改为 'exit code 0 = hook 不做决定，走正常权限流程'。
+
+#### S043 · MCP 工具按需加载 + 代码执行式过滤（tool search / code execution with MCP）
+
+- **大类/来源**：工具与接口｜[Claude Code 官方文档《MCP》（Tool search）+ Anthropic 工程博客《Code execution with MCP》；Anthropic Engineering《Code execution with MCP for efficient agents》(2025-11-04)](https://www.anthropic.com/engineering/code-execution-with-mcp)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：两层降 token：(1) MCP tool search —— 启动时只装工具名与 server instructions，完整工具定义推迟到 Claude 真正要用时再加载，官方称「adding more MCP servers has minimal impact on your context window」；(2) 代码执行式 MCP —— agent 写 TypeScript 调用 MCP 工具，中间结果留在执行环境里不经过上下文。博客给出该模式的 token 实测：把 150,000 token 的工具定义换成按需读取约 2,000 token 的工具文件，节省 98.7% ｜ 〔并集·MCP code execution(B分片)〕MCP 客户端普遍把全部工具定义前置进上下文，并让每个中间结果都流经模型；把 MCP server 呈现为文件系统上的代码 API（每个工具一个 .ts 文件），让 agent 用 ls/grep 探索目录、按需读具体接口，并可在代码里先过滤再把结果交回模型，可同时省下工具定义与中间结果两类 token。官方数字：token 用量从 150,000 降到 2,000（节省 98.7%）；示例中 2 小时销售转录避免约 50,000 额外 token，10,000 行表格经代码过滤只返回 5 行给模型。机制描述为「progressive disclosure」：模型按需读工具定义，或用 search_tools 工具检索并用 detail level 参数控制只返回名称 / 名称+描述 / 完整 schema；同页提到 Cloudflare 的 Code Mode 有类似结论。同一原则的第三种摆放位置：工具知识也可以进技能（把用法写进技能、工具只留最小接口），与技能渐进披露同构。
+- **证据**：blog 层有可核验数字，docs 层只有机制。docs/mcp.txt:730-731「Only tool names and server instructions load at session start, so adding more MCP servers has minimal impact on your context window」，并记录延迟加载下工具描述上限 16,384 字符、非延迟上限 4,096 字符（v2.1.296 起），以及 Azure 上 Foundry 部署会服务端拒绝 tool search 从而自动回退为全量前置加载。blog-code-execution-mcp.txt：「This reduces the token usage from 150,000 tokens to 2,000 tokens—a time and cost saving of 98.7%」，对应同一博客的 BrowseComp 之外的工具定义规模示例（Anthropic 托管的 MCP 集合）。注意 98.7% 是上下文/成本口径，不是编码任务正确率 ｜ 〔并集·MCP code execution(B分片)〕Anthropic 官方工程博客实测数字（150k→2k 即 98.7%；50k；10,000 行→5 行）并附 PII token 化等机制说明；属官方前后对比 / 消融，非第三方公开基准。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 4 / 可测性 4。98.7% 数字与官方博客逐字吻合且 chunk 已诚实标注其为例示非受控基准；工具面宽的自研 harness 确实每轮为全部工具描述付费，延迟装载 A/B 容易做；证据强度仅官方示例（anecdotal 定级如实），定 B。
+- **测试设计**：对照：全部工具定义前置常驻；实验组：工具搜索延迟装载；再设第三臂：代码执行式工具调用（若 harness 侧可行）。测固定上下文开销（每轮 input token 的工具描述占比）与长任务上的整体 pass rate，确认省下的预算是否真的转化为正确率提升
+- 备注：98.7% 来自 Anthropic 自家工具集合的示例，不是受控实验，也不代表任务正确率；官方还提醒延迟装载下匹配只读较短上限的那部分描述，关键信息必须放描述开头，否则检索命中但读不到。这条本质是省 token 的工程优化，是否转化为编码收益必须自测 ｜ 〔并集·MCP code execution(B分片)〕98.7% 来自一个 Google Drive/Salesforce 的示例场景而非受控基准，工具数量与任务结构与我们的大仓场景差异很大，不应直接外推；官方同页也提示引入代码执行会带来新的安全与状态管理面；需要安全沙箱、资源限制与监控，运维成本上升；对工具数少（官方指引：10 个以下工具收益有限）或输出量小的场景收益低。；修正建议：docs 层的 16,384/4,096 字符上限与 '10 个以下工具收益有限' 两点建议标注'来自文档快照，本次线上复核未核到原文（页面截断）'，或补可访问的存档链接。
+
+#### S055 · 按需工具检索（Tool Search Tool）与程序化工具调用（PTC）替代全量工具注入
+
+- **大类/来源**：工具与接口｜[Anthropic Engineering: Introducing advanced tool use](https://www.anthropic.com/engineering/advanced-tool-use)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：Tool Search Tool：工具标记 defer_loading，模型用 BM25/regex 按需展开定义，五服务器 50+ 工具场景工具定义 token 约 72K→3K、总消耗 77K→8.7K（节省 85%），代理式搜索评估准确率 Opus 4 从 49%→74%、Opus 4.5 从 79.5%→88.1%；PTC：模型在沙箱内写 Python 编排工具调用，复杂研究任务平均 token 43,588→27,297（降 37%），GIA 基准 46.5%→51.2%，内部知识检索 25.6%→28.5%，单段代码可编排 20+ 次调用消除约 19 次推理往返。
+- **证据**：Anthropic 官方数据，含具体场景规模（GitHub 35 工具等五服务器）与模型版本（beta header advanced-tool-use-2025-11-20，Sonnet 4.5+/Opus）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 5 / 可测性 5。官方数字全部核实，token 与准确率双收益且 A/B 成本极低，定 A；注意为厂商自报。
+- **测试设计**：固定模型与任务集，A/B 全量注入 vs Tool Search 检索式加载，再叠加 PTC vs 逐轮工具调用，测成功率、token、选错工具率与首 token 延迟。
+- 备注：检索式发现多一次检索往返且可能漏工具；对短平快任务（3 次以下依赖调用）PTC 收益有限；需要单独评测工具检索召回率（见 ToolRet 条目）。
+
+#### S056 · 自建工具检索层前先测检索器：工具检索本身是短板（ToolRet）
+
+- **大类/来源**：工具与接口｜[Retrieval Models Aren't Tool-Savvy: Benchmarking Tool Retrieval for LLMs (Shi et al., 2025)](https://arxiv.org/abs/2503.01763)｜证据等级：benchmark｜定级：**B**
+- **承诺改进**：首个大规模工具检索基准：7.6k 检索任务、43k 工具语料；最佳嵌入模型 NV-Embed-v1 仅 nDCG@10=33.83，带指令最佳 bge-reranker-v2-gemma 为 47.52；查询与工具文档词汇重叠极低（ROUGE-L 仅 0.06）；检索质量差使 GPT-3.5 在 ToolBench 通过率下降 11.4；用 ToolRet-train（200k+ 实例）训练后检索提升并使下游工具使用通过率提高约 10-20%。
+- **证据**：公开基准论文（2025-03，引用约 112 次），含六类检索模型对比与下游影响实验；代码 mangopy/tool-retrieval-benchmark。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 3 / 可测性 4。公开基准数字全部命中，但工具域以 Web API 为主、与仓库工具分布不同，外推需谨慎，定 B。
+- **测试设计**：以自有工具描述+真实任务查询构造内部评测集，A/B 不同检索器与指令化查询改写，报 nDCG@10 并追踪下游任务成功率。
+- 备注：该基准以 Web API/函数类工具为主，仓库专用工具（grep/edit/test）描述的词汇分布不同，数字不能直接迁移；训练提升方案需 200k 级数据投入。
+
+#### S057 · 工具描述与返回体工程：整合式工具、语义化最小响应、调用示例
+
+- **大类/来源**：工具与接口｜[Anthropic Engineering: Writing effective tools for agents — with agents（配套：Introducing advanced tool use 的 Tool Use Examples）；SWE-agent 官方 ACI 文档 + Anthropic 工程博客《Writing effective tools for agents — with agents》(2025-09-11)](https://www.anthropic.com/engineering/writing-tools-for-agents)｜证据等级：ablation→**anecdotal**（K3 修正）｜定级：**B**
+- **承诺改进**：工具是为非确定性 agent 设计的契约：用整合式工具（如 schedule_event）替代 API 薄包装链；前缀命名空间帮助在数百工具中正确选择；返回语义化字段而非 uuid/mime_type；响应支持 concise/detailed 枚举（示例从 206 token 降至 72，省约 1/3）；Claude Code 默认截断工具响应 25,000 tokens；配套博客报告 input_examples 把复杂参数处理准确率从 72% 提升到 90%；打磨工具描述曾帮助 Sonnet 3.5 取得当时 SWE-bench SOTA。 ｜ 〔并集·SWE-agent ACI 文档第4条〕SWE-agent 官方 ACI 文档第 4 条：「When commands have an empty output we return a message saying 'Your command ran successfully and did not produce any output.'」；Anthropic 总结出 5 条工具设计原则：选对工具、命名空间划清功能边界、返回有意义的上下文、优化工具响应的 token 效率、给工具描述做 prompt 工程，并强调「每个工具改动都要配一套评测来度量」
+- **证据**：Anthropic 官方工程博客的实测样例（206→72 token；25K 截断默认值）与配套博客消融（72%→90%）；SWE-bench SOTA 为定性宣称，无对照数字。 ｜ 〔并集·SWE-agent ACI 文档第4条〕SWE-agent 官方文档 docs/background/aci.md 全文第 4 条（已逐字核对）。Anthropic 博客列出上述 5 条原则原文，并给出可操作的评测方法：用 Claude Code 自动生成评测任务与 prompt/response 对、对 held-out 测试集打分、避免过严 verifier（格式差异不应判错）、用 Claude Code 自动优化工具实现。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 4 / 可测性 5。引文逐字属实且改造杠杆高，但全为厂商经验与内部测试，grade 应降为 anecdotal，定 B。
+- **测试设计**：固定任务集与模型，A/B 原始工具定义 vs 重写描述+input_examples+响应格式枚举，测成功率、每任务 token 与参数错误率。
+- 备注：官方明言前缀 vs 后缀命名效果因模型而异，必须自测；用自身 eval 迭代描述有过拟合风险，需 held-out 任务集。 ｜ 〔并集·SWE-agent ACI 文档第4条〕这是厂商工程博客的经验总结，没有对照实验（Anthropic 自己也说必须自建评测才能测出工具改动的收益），所以 evidenceGrade 只能是 anecdotal，不能当结论用；反例是 SWE-agent 消融里「Summarized search 优于 Iterative search」这类反直觉结论，说明「返回更多上下文」与「返回更少但更准」之间没有普适规则，必须逐工具实测。；修正建议：evidenceGrade 由 ablation 改为 anecdotal（条目 notes 已自述此结论，grade 字段未同步）。
+
+#### S060 · ACI：为 agent 定制接口而非照搬人类接口/裸 shell（SWE-agent）
+
+- **大类/来源**：工具与接口｜[SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering (Yang et al., NeurIPS 2024)；SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering (ICLR 2025)](https://arxiv.org/abs/2405.15793)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：LM agent 是新型『最终用户』，需要专门设计的接口（有界视图、lint 反馈、护栏式守卫）：定制 ACI 显著提升 agent 创建/编辑文件、浏览仓库与跑测试的能力，SWE-bench pass@1 12.5%、HumanEvalFix 87.7%（均为当时 SOTA，超非交互式接口方案）。消融显示去掉 lint 护栏编辑 -3.0pt、只准 shell 重定向编辑 -7.7pt、搜索结果逐条翻页式反馈 -6.0pt、文件查看窗 30 行 -3.7pt、整文件 -5.3pt、保留全量历史 -3.0pt。成本侧：同为 GPT-4 Turbo，定制 ACI 相对 Shell-only 取得 64% 相对提升（SWE-bench Lite 18.0% vs shell-only 11.0%），但相对 RAG 基线贵 8–13 倍而 %Resolved 高 6.7 倍。 ｜ 〔并集·SWE-agent ACI(D分片,含Table3全消融)〕同一个 LLM（GPT-4 Turbo / Claude 3 Opus）换成面向 LM 设计的 ACI 后，SWE-bench Lite resolved 从 Shell-only 的 11.0% 提升到 18.0%，相对提升 64%；相比 RAG 基线（2.67%）提升 6.7 倍。
+- **证据**：论文 §5：「An LM-friendly ACI's value is confirmed by SWE-agent's 64% relative increase compared to Shell-only, both with GPT-4 Turbo」；「compared to RAG on Lite, SWE-agent is 8-13x more costly but yields a 6.7-fold improved % Resolved rate」；全量 SWE-bench test set 12.47%（286/2294）、Lite 18.00%（54/300），shell-only 基线 Lite 11.0%、RAG 基线 1.31-3.79%，$1.59/解决例。消融表（SWE-bench Lite 300 例、GPT-4 Turbo，基线 18.0%）：edit action 无护栏 15.0%、no edit 10.3%、iterative search 12.0%、no search 15.7%、viewer 30 行 14.3% / 全文件 12.7%、全量历史 15.0%、无演示 16.3%；正文 §3/§5.1 与 Table 3 给出接口设计逐项消融。 ｜ 〔并集·SWE-agent ACI(D分片,含Table3全消融)〕SWE-bench Lite（300 题）+ SWE-bench 全量（2294 题）。Table 1：Shell-only w/ GPT-4 Turbo = 11.0%，SWE-agent w/ GPT-4 Turbo = 18.0%（原文：SWE-agent's 64% relative increase compared to Shell-only）；RAG w/ GPT-4 Turbo = 2.67%（Lite）/1.31%（全量），SWE-agent = 18.00%（Lite）/12.47%（全量），正文称 6.7-fold improved % Resolved。Table 3 消融（Lite，GPT-4 Turbo）：搜索 Summarized=18.0 / Iterative=12.0（↓6.0）/ No search=15.7（↓2.3）；编辑 edit action=15.0（↓3.0）/ w/ linting=18.0 / No edit=10.3（↓7.7）；文件查看 30 lines=14.3（↓3.7）/ 100 lines=18.0 / Full file=12.7（↓5.3）；上下文 Last 5 Obs.=18.0 / Full history=15.0（↓3.0）/ w/o demo=16.3（↓1.7）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 5 / 大型仓库价值 4 / 可测性 4。NeurIPS 2024 同行评审、全部消融数字逐字命中，ACI 设计结论是自研 harness 工具层的基准参照，定 A（绝对分数已过时，notes 已如实标注）。
+- **测试设计**：同模型同任务集设四臂：shell-only（仅 bash）/ shell + 少量定制只读工具 / SWE-agent 式完整 ACI / 自研 ACI；统一 token 或统一美元预算，比较 resolved rate 与 $/resolved，产出帕累托前沿而不是单点最优；再对工具层做单变量消融（有/无编辑后 lint 回喂、搜索结果汇总 vs 逐条、观察窗口 30/100/全文件、历史全量 vs 截断），比较解决率与步数。
+- 备注：2024 年分数已过时（当时 pass@1 12.5%），应引用其接口设计结论而非具体数字；ACI 迭代需持续投入评测驱动的设计循环；+64% 是在 2024 年 GPT-4 Turbo + 300 例 Lite 上得到的，模型能力提升后收益可能大幅缩水，必须在自研 harness 上用当代模型重做同款对照。最重要的反面证据：纯 bash 的 100 行极简 harness 也能在 SWE-bench Verified 拿到 74%+（见「极简 bash-only 循环」条），直接削弱「必须自研复杂 ACI」的前提；『no search 只降 2.3pt』提示搜索接口并非越重越好。 ｜ 〔并集·SWE-agent ACI(D分片,含Table3全消融)〕反面证据在同文：模仿人机 UI 的 Iterative search（next/prev 逐条看）比完全不给搜索工具还差（12.0 vs 15.7）——不要照搬人类 IDE 交互。窗口大小也不是越大越好（full file 12.7 < 100 lines 18.0）。论文为 2024 年 GPT-4/Claude 3 时代，工具调用范式已变，绝对数值需重新验证。
+
+#### S061 · 窗口化文件查看器（约 100 行窗口）+ 编辑后自动回显
+
+- **大类/来源**：工具与接口｜[SWE-agent 论文（Yang et al., 2024）Table 3 / §3 与 §5.1](https://arxiv.org/abs/2405.15793)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：给 agent 专用文件查看器（默认窗口 100 行，可 scroll_up/scroll_down/goto），编辑命令执行后查看器自动显示更新后的内容；消融显示窗口 100 行 18.0% ≫ 30 行 14.3% ≫ 全文件 12.7%（SWE-bench Lite 300 例，GPT-4 Turbo） ｜ 〔并集·SWE-agent 100行窗口(C分片,含网格)〕不用 cat 整文件，每轮只展示最多 100 行的窗口；窗口大小是 ACI 中影响最大的单一旋钮，100 行显著优于 30 行、200 行和整文件。
+- **证据**：论文 Table 3「File Viewer」消融：30 lines = 14.3（↓3.7）、100 lines = 18.0（基准配置）、Full file = 12.7（↓5.3）；消融在 SWE-bench Lite 的 300 个实例上进行。论文 §3 还给出窗口大小等超参是网格搜索选出的；官方 ACI 文档复述「file viewer works best when displaying just 100 lines in each turn」。 ｜ 〔并集·SWE-agent 100行窗口(C分片,含网格)〕论文 Table 3（File Viewer 消融，SWE-bench Lite / GPT-4 Turbo）：100 lines 18.0；30 lines 14.3（↓3.7）；Full file 12.7（↓5.3）。§B.1 超参网格（dev 子集 37 例、5 次采样均值）独立复现：temperature 0.0 / window 100 / Last-5 = 15.1，window 200 / Last-5 = 10.8，window 200 / Full = 9.2。代码确认：tools/windowed/bin/open:41-42 调 wf.goto(line_num-1, mode='top') 加 print_window()；tools/windowed/bin/scroll_down:8 一次滚动正好一个窗口；tools/windowed/bin/_state:18-21 每步把 open_file/working_dir 写进 /root/state.json。窗口值是配置项：config/sweagent_0_7/07.yaml:89-90 设 WINDOW: 100 与 OVERLAP: 2。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 5。同行评审论文消融、数字逐字吻合，大仓库下窗口化读取是刚需且极易 A/B，定级 A。
+- **测试设计**：对照组 = 现有整文件/cat 读取；实验组 = 100 行窗口 + 编辑后自动回显；同一模型、同一批大仓库 issue 任务、同一 token 预算，比较 resolved rate 与平均上下文占用（token/任务）。
+- 备注：反面证据：同论文 Table 3 显示「Full history 15.0（↓3.0）」劣于「Last 5 Obs. 18.0」，说明窗口化与历史截断必须一起设计；且 30 行窗口掉 3.7pp，说明窗口不是越大越好，存在最优点，需要按任务/仓库规模扫参而非照抄 100。 ｜ 〔并集·SWE-agent 100行窗口(C分片,含网格)〕论文网格只在 37 个 dev 样本乘 5 次上搜索，样本量小；Claude 3 Opus 与 GPT-4 在网格上是三方并列最优（0.0/100/Last-5、0.2/100/Last-5、0.2/200/Full 都为 8.1），最优窗口强依赖模型，换模型需重扫。100 这个值在 v1.0 默认配置里已不再出现（改用 str_replace_editor 的 view_range 加 filemap），属默认关闭状态。
+
+#### S062 · 编辑命令内嵌 lint 门禁：致命语法错拒绝落盘并回显前后对照
+
+- **大类/来源**：工具与接口｜[SWE-agent 论文 Table 3 + SWE-agent 官方实现 tools/windowed/lib/flake8_utils.py](https://arxiv.org/abs/2405.15793)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：在 edit 里集成 linter，只允许「不产生 major error」的修改落盘，非法编辑被丢弃并要求 agent 重试：w/ linting 18.0 vs 单纯 edit action 15.0（↓3.0）vs 完全无 edit 接口 10.3（↓7.7），SWE-bench Lite 300 例，GPT-4 Turbo ｜ 〔并集·SWE-agent 编辑护栏(C分片,51.7%/57.2%)〕在编辑命令里内置 linter：语法错误则丢弃该次编辑不写入文件，并把原始代码与编辑后代码对照展示给 agent 让它重试；比不做 lint 的编辑接口高 3.0pp。
+- **证据**：论文 Table 3「Editor」消融：edit action = 15.0（↓3.0）、w/ linting = 18.0、No edit = 10.3（↓7.7）。官方实现 flake8_utils.py 里 lint 命令写死为 `flake8 --isolated --select=F821,F822,F831,E111,E112,E113,E999,E902`（只拦未定义名/语法错/缩进错这类致命项，不拦风格项）；错误回报格式为 `- line {line_number} col {col_number}: {problem}`；实现还会把「编辑前就存在的错误」按新行号平移后过滤掉，只把「编辑窗口之后新出现的错误」归因给本次编辑。 ｜ 〔并集·SWE-agent 编辑护栏(C分片,51.7%/57.2%)〕论文 Table 3（Editor 消融，SWE-bench Lite / GPT-4 Turbo）：edit w/ linting 18.0 对比 edit 15.0（↓3.0）。§3 写明 Select errors from the linter are shown to the agent along with a snippet of the file contents before/after ... Invalid edits are discarded, and the agent is asked to try editing the file again.；Figure 6 给真实报错样例（E999 IndentationError / Your changes have NOT been applied）。行为统计（§5.2，SWE-bench full 2294 例 GPT-4 Turbo）：1185 例（51.7%）轨迹至少出现过 1 次失败编辑；任一次编辑尝试最终成功的概率 90.5%，但已失败 1 次之后骤降到 57.2%。配置确认：config/sweagent_0_7/07.yaml:93-95 显式挂载 tools/windowed_edit_linting，护栏是独立可插拔 bundle。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 5。论文消融支持 +3.0pp，且大仓库语法错级联放大了落盘门禁价值，A/B 成本极低，定级 A。
+- **测试设计**：对照组 = 编辑直接落盘不做 lint；实验组 = lint 门禁（同一 lint 规则集）；记录落盘被拒率、被拒后重试成功率、以及最终 resolved rate，验证「拦截→修复」闭环是否真的净赚。
+- 备注：反面证据：SWE-bench Pro 的失败模式聚类显示「Syntax error」仍占 Opus 4.1 失败 24.2%、Gemini 2.5 失败 30.5%（说明纯语法门禁不足以消除语法错）；LintEval（arXiv:2610.20027）显示闭源模型 lint Reduction@P 可达 90.4% 但 Pass@1 仅 67.1–68.3%，即「为消 lint 而改」可能破坏功能——门禁规则必须只覆盖致命错误，不能扩到风格类告警。 ｜ 〔并集·SWE-agent 编辑护栏(C分片,51.7%/57.2%)〕反直觉风险：失败编辑一旦发生，恢复概率从 90.5% 掉到 57.2%，护栏可能把一次性大步改错变成多轮反复改错，token 受限时未必净赚；18.0 对 15.0 是 n=300 单次运行、无置信区间。v1.0 已改用 str_replace_editor，其 bin/str_replace_editor 源码未逐行核实（确认文件存在，29746 字节），1.0 默认是否仍带 lint 未核实。
+
+#### S063 · 摘要式受限搜索：只回命中文件清单 + 阈值守卫要求收窄查询
+
+- **大类/来源**：工具与接口｜[SWE-agent 论文 Table 3 / Figure 5 + 官方 docs/background/aci.md](https://raw.githubusercontent.com/SWE-agent/SWE-agent/main/docs/background/aci.md)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：官方 ACI 文档第 3 条明确：定制全目录搜索命令要「succinctly list the matches——只列出至少含一个匹配的文件」，给模型看每个匹配的上下文会让模型困惑；Table 3 消融：Summarized search 18.0 vs Iterative search 12.0（↓6.0）vs 完全不给 search 工具 15.7（↓2.3） ｜ 〔并集·SWE-agent 摘要式搜索(C分片,含阈值代码)〕一次性列全所有命中文件加命中次数的摘要式搜索接口，优于仿 IDE 的逐条迭代搜索（next/prev），也优于不给搜索工具；迭代式搜索会让 agent 逐条看完所有结果，耗尽预算甚至比没有搜索更差。
+- **证据**：论文 Table 3「Search」行：Summarized = 18.0、Iterative = 12.0（↓6.0）、No search = 15.7（↓2.3）；§5.1 正文也写明「Iterative search 偶尔产生大量无关结果行」。官方 ACI 文档：「Showing the model more context about each match proved to be too confusing for the model」。 ｜ 〔并集·SWE-agent 摘要式搜索(C分片,含阈值代码)〕论文 Table 3（SWE-bench Lite，GPT-4 Turbo，% Resolved，基准消融）：Summarized search 18.0；Iterative search 12.0（↓6.0）；No search 15.7（↓2.3）。§5.1 说明 iterative 设置下 agent 会 calling next until each result has been inspected，导致 12.0% 比无搜索的 15.7% 更差。官方文档 background/aci 给出设计理由：we simply list each file that had at least one match. Showing the model more context about each match proved to be too confusing.。代码确认（main 分支 tools/search/bin/search_dir:18）：find 加 grep -nIH 后立刻 cut -d: -f1 | sort | uniq -c，只按文件聚合计数，不回显命中行内容；:29 阈值守卫 if [ $num_files -gt 100 ] 则输出 More than N files matched ... Please narrow your search. 并 return。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 5。关键负面结果（迭代搜索比无搜索还差 2.3pp）经核实，搜索返回形态必须与有无搜索一起消融，定级 A。
+- **测试设计**：三臂 A/B/C：无搜索工具 / 摘要式搜索（只列文件+行号）/ 迭代式搜索（带上下文片段）；同模型同任务集，比较 resolved rate、定位命中率（先用检索结果判断应改哪个文件的准确率）与 token/任务。
+- 备注：最重要的负面结果：给 agent 加「更好用」的迭代式搜索反而比「完全不给搜索」还差 2.3pp（12.0 vs 15.7），即搜索工具本身可能是有害的，必须与「返回内容形态」一起做消融，否则会把噪声引入流程；SWE-bench Pro 也报告 Sonnet 4 有 17.0% 的失败是「无休止读文件」。 ｜ 〔并集·SWE-agent 摘要式搜索(C分片,含阈值代码)〕版本漂移：论文 §3 写 at most 50 results，v1.0 代码阈值是 100 个文件；0.7 论文版配置挂载同一 tools/search bundle（config/sweagent_0_7/07.yaml），v1.0 默认 config/default.yaml 已不再默认挂载 tools/search。搜索命令默认搜当前目录 ./，多 agent 同仓并行时必须显式传绝对目录，否则互相污染。
+
+#### S064 · 反例基线：纯 bash 极简 harness（mini-swe-agent，SWE-bench Verified 74%+）
+
+- **大类/来源**：工具与接口｜[mini-swe-agent 官方文档与仓库（Princeton/Stanford SWE-agent 团队，2025 起持续维护）；SWE-agent 官方 README 与 mini-swe-agent、DeepSWE(2026)](https://github.com/SWE-agent/mini-swe-agent)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：mini-swe-agent「Does not have any tools other than bash — it doesn't even use the tool-calling interface of the LMs」，官方声明在 SWE-bench verified 上 >74%，且启动比 Claude Code 更快；官方文档直言「2024 年我们强调工具与专用接口，一年后其中很多已不必要」。实现形态：约 100 行 Python 的线性 ReAct 循环，每次动作用 subprocess.run 独立执行，可无缝换成 docker exec 以便沙箱化与并行扩展；现被 SWE-bench 团队用作标准评测 harness。 ｜ 〔并集·mini-swe-agent ACI 衰减(C分片,DeepSWE)〕SWE-agent 官方已把开发重心移交给 mini-swe-agent（100 行 Python、只有 bash 一个工具、线性历史），后者在 SWE-bench Verified 上超过 74%；2026 年的同模型 harness 对比中极简 harness 反而匹配或超过各家原生 CLI。2024 年那套 ACI 工程在当代模型上的边际收益已大幅缩水，harness 投入应优先转向并行度与验证质量。
+- **证据**：官方 README（已核对原文）："scores >74% on SWE-bench verified!"、"no tools other than bash"、完全线性消息历史、每次动作用 subprocess.run 独立执行；官方文档「Why use mini-SWE-agent for research?」与「Performant: Scores >74% on the SWE-bench verified benchmark」。 ｜ 〔并集·mini-swe-agent ACI 衰减(C分片,DeepSWE)〕官方声明：SWE-agent README 置顶警告 Most of our current development effort is on mini-swe-agent, which has superseded SWE-agent ...，文档站横幅 SWE-agent is now in maintenance-only mode。mini README 称 Just some 100 lines of python for the agent class、Scores >74% on the SWE-bench verified benchmark、Does not have any tools other than bash。同模型对比（DeepSWE 博客 Evaluation harness 节，2026，10 个 SWE-Bench Pro 任务的小规模试点）：claude-opus-4.7 在 mini-swe-agent 50% 对比 Claude Code 40%（中位输出 token 59k 对比 48k）；gpt-5.5 mini 40% 对比 Codex CLI 40%（16k 对比 25k）；gemini-3.1-pro mini 40% 对比 Gemini CLI 20%（18k 对比 15k）。mini 的架构理由直接指向并行化：FAQ 写 subprocess.run 每个动作完全独立，trivial to execute the actions in sandboxes and scale up effortlessly。反面锚点：SWE-bench Verified 74%+ 远高于 SWE-agent 论文时代的 GPT-4 Turbo 12.47%（full）与 18.00%（Lite），但两者模型不同，不构成同模型对照。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 4 / 可测性 5。官方自述基准数字属实、架构并行友好性直接可测，作为重型 scaffold 的反例基线价值高，定级 A。
+- **测试设计**：对照：自研重型 scaffold；实验：bash-only 100 行循环（同模型同任务集），比较解决率、成本、单容器资源占用与并行吞吐；并把自研 harness 的「工具层」做成可插拔，同 prompt/模型/上下文策略下切换 shell-only 与 ACI 工具层跑同一批大仓库 issue。
+- 备注：这是本主题最重要的反面证据：它不否认 ACI 有用（mini 官方也提供「You should use swe-agent if you want to experiment with different sets of tools」），但说明「工具好用程度决定 agent 上限」在 2024→2025 后已不成立，收益更多来自模型与脚手架。负面点：>74% 依赖新一代强模型，弱模型上简单循环与好接口的差距会重新拉大（见 SWE-agent 消融）；>74% 的数字来自官方文档自述、模型版本随时间变动，且这是 SWE-bench Verified（500 题）而非大仓库，引用时应标注为官方声明而非独立复现；无状态 subprocess 意味着每步重放环境，长会话有开销。 ｜ 〔并集·mini-swe-agent ACI 衰减(C分片,DeepSWE)〕DeepSWE 那组 harness 对比只是 10 个任务的小试点、无置信区间，作者自认 Some of that gap is likely prompt-tuning rather than capability（mini 的系统提示词推荐工作流几乎逐条对应 SWE-bench 的评分方式），只能作方向性证据（evidenceGrade 定为 benchmark 是因数字来自真实基准跑分，样本量小这一局限已写明）。2024 年论文里的 +3.0pp 级 ACI 收益不必然迁移到 2026 年的模型上。；修正建议：将「现被 SWE-bench 团队用作标准评测 harness」改为「SWE-bench 团队用其跑官方 bash-only 榜单（mini 由 SWE-bench 原班团队构建）」。
+
+#### S065 · 编辑格式作为一等实验变量：按模型路由（diff/whole/udiff）+ unified diff 三件套 + 合规率先导指标
+
+- **大类/来源**：工具与接口｜[aider polyglot 基准榜单 polyglot_leaderboard.yml + 官方模型配置 adv-model-settings.md（225 道 Exercism 多语言题）；aider 官方博客与文档《Unified diffs make GPT-4 Turbo 3X less lazy》(2023-12-21) + Edit formats 文档 + aider polyglot leaderboard](https://aider.chat/2024/12/21/polyglot.html)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：没有对所有模型都最优的编辑格式：GPT-4 级模型用 diff（SEARCH/REPLACE），弱模型用 whole，GPT-4 Turbo 家族用 udiff，Gemini 用 diff-fenced；aider 为每个模型内置最优格式并持续用基准校准。同一模型只换编辑格式，成绩可差近 2 倍：Qwen2.5-Coder-32B-Instruct 用 diff 格式通过率 8.0%、格式合规率 71.6%、畸形响应 148 次；改用 whole 格式通过率 16.4%、合规率 99.6%、畸形响应 1 次。格式合规率（percent cases well formed）可作选型的先导指标。 ｜ 〔并集·aider udiff 三件套消融〕udiff 使 gpt-4-1106-preview 在 89 题懒惰/重构基准上从 SEARCH/REPLACE 的 20% 升到 61%，懒惰注释任务数 12→4（3 倍改善）；gpt-4-0613 从 26%→59%。消融：去掉「高层 diff」提示使编辑错误增加 30-50%；禁用柔性 patch 策略使原始 Exercism 基准编辑错误增加 9 倍。设计原则：FAMILIAR/SIMPLE/HIGH LEVEL/FLEXIBLE。 ｜ 〔并集·aider 编辑格式(D分片,laziness基准)〕只换编辑格式就能让同一模型在同一基准上分数差 20–40 个百分点：GPT-4 Turbo 在 aider 的 89 题 laziness 基准上从 SEARCH/REPLACE 的 20% 提升到 unified diff 的 61%；polyglot 基准上 gpt-5(high) 用 diff 格式 88.0%（$29.08），弱模型 gpt-4o-mini 用 whole 格式仅 3.6%。
+- **证据**：代码核对（本地抓取仓库文件）：aider/website/docs/config/adv-model-settings.md 中全部模型条目的 edit_format 分布为 diff×289、editor-diff×137、diff-fenced×35、udiff×4（仅 GPT-4 Turbo 家族）、whole×1、architect×1（o1-preview）。polyglot_leaderboard.yml 中唯一同模型双格式对照：Qwen2.5-Coder-32B-Instruct whole=16.4%（格式符合率 99.6%）vs diff=8.0%（符合率 71.6%）——弱模型用 diff 反而减半。榜单中格式合规率低的还有 chatgpt-4o-latest(diff) 64.4%、QwQ-32B(diff) 67.6%、gpt-oss-120b(diff) 79.1%；而 gemini-2.5-pro 用 diff-fenced 合规率 99.6%、o3-pro 用 diff 合规率 97.8%。2023 年 benchmarks.md：GPT-3.5 whole 46%（0301）优于 diff 30%，各版本均无法有效使用 diff。 ｜ 〔并集·aider udiff 三件套消融〕官方博客+消融实验：基准为 9 个流行开源 Python 仓库中 AST 扫描出的 89 个「方法提为顶层函数」重构任务（方法 100-250+ AST 节点，按 AST 节点数校验防懒惰省略）。hunk 头 @@ ... @@ 不带行号，按 search/replace 语义解释（「GPT 对行号极差，任何行号格式都被多次基准否定」）。代码核对（本地抓取）：aider/coders/udiff_coder.py:16-42 定义 UnifiedDiffNoMatch/NotUnique 错误与「部分 hunk 已应用」提示；:73 normalize_hunk 后逐 hunk 用 apply_hunk 多级回退。 ｜ 〔并集·aider 编辑格式(D分片,laziness基准)〕（a）laziness 基准 89 个 Python 重构任务，gpt-4-1106-preview：SEARCH/REPLACE 基线 20%、输出 lazy comments 12 题；unified diff 61%、lazy comments 降到 4 题（reduced laziness by 3X）；同基准 gpt-4-0613：26% → 59%；该基准 28% 任务文件过大超 8k 上下文，给出 72% 天花板。（b）aider 早期 Exercism 基准（133 题）：whole 格式 GPT-3.5 2 月版 46%、6 月版 39%；diff 格式从 30% 降到约 19%；函数调用式在所有 GPT-3.5/GPT-4 上都差于 whole。（c）polyglot leaderboard（225 个 Exercism 练习 × 6 语言）逐条记录 模型×编辑格式×分数×成本×well-formedness：gpt-5(high) diff 88.0%、well-formed 91.6%；DeepSeek-V3.2-Exp 用 $0.88 达 70.2%（well-formed 98.2%）；Gemini 2.5 Pro well-formedness 100.0%；o3-pro 84.9% 但 $146.32。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 4 / 可测性 5。厂商自跑基准但原始数据逐条可查且全部吻合，编辑格式按模型路由是大仓库多模型产线的高杠杆旋钮，定级 A。
+- **测试设计**：对每个待用模型，在同一批真实仓库任务上跑 whole / diff(search-replace) / diff-fenced / udiff 四种格式各 N 次；A/B 单一编辑格式 vs 按模型路由的格式映射。主指标 resolved rate 与补丁一次应用成功率，副指标格式合规率、畸形编辑导致的文件损坏数、token/任务；用格式合规率做早期筛选再跑全量。
+- 备注：反面证据：格式合规率与通过率并非一一对应（Qwen3-32B 合规率 83.6% 但通过率 40.0%，o3-pro 合规率 97.8% 通过率 84.9%），合规率只是必要条件不是充分条件；udiff 仅 4 个模型在用，说明 GPT-4 Turbo 时代的结论不能直接外推到 2026 模型，路由表需按自家模型池重测；这是 225 道练习题级别的小仓库任务，不能直接外推到大型仓库，需在自研任务集上重测。 ｜ 〔并集·aider udiff 三件套消融〕udiff 是为 GPT-4 Turbo 定制的：2025 年 polyglot leaderboard 头部模型（gpt-5/o3/Claude）全部用 diff 而非 udiff，结论强依赖模型代际；柔性 apply 有掩盖模型退化的风险，应同时遥测「柔性救回次数」；博客还实测「情感诉求提示（盲人/无手/$2000 小费）」在两种格式下都降低得分—— folk remedy 不可信 ｜ 〔并集·aider 编辑格式(D分片,laziness基准)〕反面教训：aider 明确记录给模型加情绪化 prompt（盲人/没手/会付 $2000）等土方子反而降低分数；函数调用 API 结构化输出更可靠但对编辑任务反而更差。2023 年数据模型已过时；最优格式随模型变化（diff vs diff-fenced vs whole），不能一套格式打天下；aider 现已按模型自动选择最优格式，可作为「harness 需按模型自适应」的旁证。
+
+#### S066 · 不要用 JSON / function-call 承载代码正文，代码用 markdown 或专用文本块返回
+
+- **大类/来源**：工具与接口｜[aider 官方博客《LLMs are bad at returning code in JSON》(2024-08-14) 与官方数据 code-in-json.yml（133 道 Exercism 题）](https://aider.chat/2024/08/14/code-in-json.html)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：把代码包进结构化 JSON 会同时降低通过率并引入更多语法错误：deepseek-coder V2 0724 Markdown 59.4–61.7% vs JSON 48.9–53.4%；claude-3.5-sonnet Markdown 60.2–60.9% vs JSON 51.9–55.6%；OpenAI 的 strict JSON 模式也无改善（gpt-4o-2024-08-06 JSON 56.4–60.2% vs JSON(strict) 54.1–59.4% vs Markdown 60.2–61.7%）。4 个头部模型（claude-3-5-sonnet-20240620、deepseek-coder V2、gpt-4o-0513、gpt-4o-0806）×5 次×133 题对照，markdown 返回代码的通过率全部优于 tool-call JSON；sonnet 无语法错误但分数仍降，说明 JSON 还挤占了解题注意力。
+- **证据**：官方数据 code-in-json.yml 逐行可查：deepseek-coder V2 JSON 行 pass_rate_1 = 48.9/49.6/50.4/53.4×2 且 syntax_errors 2–11、indentation_errors 1；Markdown 行 59.4–61.7 且语法错 0。claude-3.5-sonnet JSON 51.9–55.6 vs Markdown 60.2–60.9。Figure 1 五次平均通过率 markdown>JSON 对全部 4 模型成立（gpt-4o-0513 差距最小 -0.4pt，在 5 次误差内）；Figure 2 统计 5 次运行的语法错误总数 JSON 明显更高；博客给出具体失败样例（f-string 单引号嵌套在 JSON 转义下错写、unterminated string literal）。2023 年 benchmarks.md 亦实测 whole-func/diff-func 两个函数调用格式在所有模型上都更差，且 GPT-3.5 出现幻觉 function_call（name:"python" 塞整份文件）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 4 / 可测性 5。原始数据完全支持 claim，对产线「代码走文本块、元数据走 JSON」的接口设计是直接依据，定级 A。
+- **测试设计**：同模型同任务集两臂：编辑内容走 JSON tool-call（含 provider 级 strict/structured output）vs 走 markdown 代码块 + 解析器，各 5 次重复取均值；统计通过率均值±极差、落盘后语法错数、解析失败率、token/任务。
+- 备注：反面/边界证据：gpt-4o-2024-05-13 上 Markdown 与 JSON 基本持平（Markdown 58.6–60.9 vs JSON 58.6–60.2），说明这是模型能力相关而非普适禁令；博客自己也承认 strict JSON「看起来为时尚早」就切换。结论应表述为「默认用文本块，对个别强模型可再测 JSON」。另外该结论截至 2024-08 模型代际，2025-26 模型的原生 structured output 能力可能已缓解，属于必须重测的「过期结论」候选；实验是单次尝试版本，与主 leaderboard 数字不可直接比。
+
+#### S075 · PostToolUse hooks：编辑后强制 lint/format/test 并回喂失败
+
+- **大类/来源**：工具与接口｜[Claude Code Hooks 官方文档；aider 自动 lint-and-fix](https://code.claude.com/docs/en/hooks-guide)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：在工具生命周期挂用户脚本：PostToolUse（如 Edit|Write 后自动跑 prettier/lint/相关测试）、PreToolUse 可拦截动作并把拒绝原因回喂模型（exit 2 / permissionDecision deny + reason）、Stop 钩子把 reason 回喂使模型继续修——把质量门禁从『模型记得做』变成 harness 确定性地做 ｜ 〔并集·aider tree-sitter lint 反馈回路〕每次 LLM 编辑后自动 lint（auto_lint=True 默认），tree-sitter 解析失败产生 ERROR 节点即报语法错误；lint 报告不用裸行号，而是用 tree-sitter AST 把出错行嵌入其所在函数/类的带行号上下文中展示，提升模型修复成功率。SWE Bench Lite 上配置 test-cmd 后自动修测试错误是拿到 26.3% SOTA（前纪录 20.3%）的组成部分。
+- **证据**：官方文档（已核对原文）：PostToolUse+matcher "Edit|Write" 跑 jq 取 file_path 再 npx prettier --write 的完整示例；PreToolUse 拒绝时 "feeds permissionDecisionReason back to Claude"；Stop 钩子 reason "is fed back to Claude so it keeps working"。效果侧为社区/官方经验（无受控数字）：aider 官方文档称每次 LLM 编辑后自动 lint+测试并回喂修复（aider.chat/docs/usage/lint-test.html），其 tree-sitter lint 博客明确说明未提供基准数字 ｜ 〔并集·aider tree-sitter lint 反馈回路〕代码+文档核对：base_coder.py:105-106 auto_lint=True、auto_test=False（默认只 lint 不自动跑测试）；linting.md 给出裸 flake8 输出 vs AST 上下文报告的对照示例，主张「LLM 处理行号很差」；aider/linter.py 用 grep-ast 的 TreeContext 渲染出错行及父作用域；2024-05-22-swe-bench-lite.md：lint 与 test 结果进入 outcome 遥测并触发自动修复（基准中 lint 建议总是被接受）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 4 / 可测性 5。机制经双官方来源核实、效果侧仅有经验证据，但实现成本与 A/B 成本都极低，定级 B。
+- **测试设计**：同任务集两组：模型自主决定何时 lint/test（对照） vs 编辑后强制 hook 跑 lint+相关测试并回喂失败（实验）；比较 lint 违规残留率、返工轮次、解决率、延迟开销
+- 备注：hook 脚本慢会拖累每步延迟（大仓库全量测试不可行，须做受影响测试选择）；过度拦截可能把模型逼进绕路行为；效果侧目前只有经验证据，无公开 A/B 数字 ｜ 〔并集·aider tree-sitter lint 反馈回路〕「AST 报告优于裸输出」本身只有定性主张，无独立消融数字；auto_test 默认关闭是因为测试可能很慢或被 agent 误改，SWE-bench 设置里基准 harness 在外部重跑测试并把 agent 对测试文件的修改丢弃
+
+#### S077 · SEARCH/REPLACE 柔性解析器 + 结构化错误反馈 + 反射上限（max_reflections=3）闭环
+
+- **大类/来源**：工具与接口｜[aider](https://github.com/Aider-AI/aider/blob/main/aider/coders/editblock_coder.py)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：对模型产出的不完美编辑块做多级容错匹配（精确→容忍前导空白→跳过空行→"..."省略号还原→模糊匹配），失败时把结构化错误发回模型重试，最多反射 3 次；leaderboard 上第二段通过率普遍数倍于第一段。
+- **证据**：代码核对（本地抓取）：aider/coders/editblock_coder.py:134 perfect_or_whitespace、:177 跳过空行重试、:190 try_dotdotdots（还原省略段）、:243 replace_part_with_missing_leading_whitespace（相对缩进匹配）、:386 HEAD 正则 ^<{5,9} SEARCH>?$（容忍 5-9 个尖括号）、:550-593 文件名缺失/拼错时对 valid_fnames 模糊匹配。base_coder.py:100-101 num_reflections/max_reflections=3、:933-944 反射循环。polyglot_leaderboard.yml：claude-3-5-sonnet-20241022 pass_rate_1=22.2%→pass_rate_2=51.6%，o4-mini(high) 19.6%→72.0%，说明第二段（含错误反馈重试）贡献巨大。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 5 / 可测性 5。机制经源码核实、收益经官方 leaderboard 数据核实，是无人值守产线消化格式性失败的最直接可抄方案，仅 '普遍数倍' 措辞需软化。
+- **测试设计**：A/B：对照组严格解析+失败即终止；实验组柔性解析链+结构化错误反馈+≤3 次反射；指标=最终落盘成功率、平均重试轮数、每任务成本
+- 备注：p1→p2 的跳升同时包含「修代码逻辑」与「修格式」两种收益，aider 未单独消融；反射上限 3 是经验值，产线可扫描不同上限的成本-收益曲线；基准中测试错误只回传前 50 行以防撑爆小上下文（benchmarks.md）；修正建议：claim 中 '第二段通过率普遍数倍于第一段' 建议改为 'leaderboard 上第二段通过率显著高于第一段（如 claude-3.5-sonnet 22.2%→51.6%、o4-mini(high) 19.6%→72.0%，含格式修复与代码修复两种收益）'；引用行号改为函数名锚点以避免漂移。
+
+#### S119 · 单命令行区间编辑：一条 edit <start>:<end> 完成多行替换，编辑后自动回显文件新状态
+
+- **大类/来源**：工具与接口｜[SWE-agent](https://arxiv.org/abs/2405.15793)｜证据等级：ablation｜定级：**B**
+- **承诺改进**：把定位行号、替换、查看结果压缩成一条命令，编辑后文件查看器自动刷新，agent 一步完成多行修改并立即观察效果；不给专用编辑命令（只能靠重定向与 sed）会显著掉分。
+- **证据**：论文 Table 3（Editor 消融，SWE-bench Lite / GPT-4 Turbo）：edit 15.0（↓3.0）；No edit 10.3（↓7.7），专用编辑接口带来 +4.7pp、相对 +45.6%。§3 与 Table 4 定义接口 edit <n>:<m> <replacement_text> end_of_edit 三个必填参数；§5.1 解释 No edit 下两种替代方式各有缺陷：重定向要复制重写整个文件，sed 多行编辑笨拙且副作用难察觉。代码确认 1.0 版换成 Anthropic 风格统一编辑器：tools/edit_anthropic/config.yaml:3-4 signature 为 str_replace_editor <command> <path> ...，command 枚举 view/create/str_replace/insert/undo_edit，:12 docstring 明确长输出会被截断并标记 <response clipped>。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 3 / 可测性 5。专用编辑命令 +4.7pp 的消融属实，但已是业界标配（OpenHands/Claude Code 同源），作为增量策略价值中等、列 B。
+- **测试设计**：A 组给 agent 纯 bash（cat/sed/重定向），B 组给行区间编辑工具（刻意不带 lint 护栏以隔离本项），C 组给区间编辑加 undo_edit；同模型同任务集比 %Resolved 与编辑失败轮次占比。
+- 备注：tools/edit_anthropic/config.yaml:5-6 注释明确 docstring 抄自 OpenHands（openhands/agenthub/codeact_agent/function_calling.py），是业界通用做法而非 SWE-agent 独创，需与其它 harness 做区分实验才能算增量。undo_edit 在原论文 Table 4 的 GPT-4 最优配置里并不存在，是 1.0 后加的，论文无对应消融数字。；修正建议：可将 claim 中『编辑后自动回显文件新状态』软化为『编辑命令与文件查看器配套，编辑结果可在后续观察中确认』，或补一条 1.0 仓库 tools/edit_anthropic 的引用作支撑。
+
+#### S128 · 把补丁产出责任从「模型直接写 unified diff」改为「模型改文件、runner 从 git 状态导出 patch」
+
+- **大类/来源**：工具与接口｜[Claw-SWE-Bench: A Benchmark for Evaluating OpenClaw-style Agent Harnesses on Coding Tasks (arXiv 2606.12344)](https://arxiv.org/abs/2606.12344)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：固定模型下 7 个 harness 的 Pass@1 最大差 24.3pp（Qwen 3.6-flash）；改为「模型改仓库文件、runner 从 git 状态导出 patch」后，同一模型（GLM 5.1）resolved 率从 19.3% 升到 71.2%，apply 失败率降到 1.5% 以下。
+- **证据**：350 个真实 GitHub issue（8 种语言、43 个仓库），每格 3 次重复共 22,050 次任务执行。Table 2（Pass@1%）：GLM 5.1 下 OpenClaw 71.2 / Hermes Agent 73.1 / nanobot 68.7 / ZeroClaw 69.7 / GenericAgent 62.9 / DeepSeek Harness 69.1 / Meta-Harness 65.7；Qwen 3.6-flash 下 60.9 / 62.8 / 52.5 / 58.3 / 38.5 / 56.8 / 45.1（最大差 24.3pp）；DeepSeek-V4.1-Flash 下 79.8 / 81.7 / 79.6 / 76.1 / 71.5 / 76.5 / 74.9。Table 1 适配器消融：bare adapter（模型直接产 patch 文本）resolved=19.3%，full adapter（模型经工具改文件）resolved=71.2%，apply 失败 <1.5%。成本差异同样大：DeepSeek-V4.1-Flash 下 GenericAgent $12 vs OpenClaw $50。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 5。摘要确认 350 issue/8 语言/43 仓库；全文 HTML 逐格确认 Table 2 七 harness 三模型全部 Pass@1 数字、Qwen 3.6-flash 最大差 24.3pp、Table 1 适配器消融 bare 19.3%→full 71.2%、apply 失败 <1.5%、22,050 次执行（21 格 × 350 × 3）、GenericAgent $12 vs OpenClaw $50，全部精确吻合；『模型改文件、runner 从 git 导出 patch』是本批最直接可落地的 harness 改造。
+- **测试设计**：在自研 harness 上做 A/B：实验组走「工具改文件→git diff 导出 patch」，对照组走「模型直出 unified diff 文本」，在大仓库任务上统计 resolved、apply-fail 率与 token。
+- 备注：论文自述 Meta-Harness 用了被评测任务的反馈做进化，与其他 harness 不构成公平对比；Hermes Agent 三个模型上都最高但未开源复现条件。8 语言/43 仓库的规模与黑灯工厂目标接近，是很好的外部对标基准。
+
+#### S173 · 编辑接口三段式解耦：Viewer（按需抽码）+ 主 agent + Editor（自然语言指令直接落盘）
+
+- **大类/来源**：工具与接口｜[SWE-Edit: Rethinking Code Editing for Efficient SWE-Agent（Microsoft，arXiv 2604.26102v2, 2026-04-28）](https://arxiv.org/abs/2604.26102)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：把「看代码 / 规划改动 / 执行编辑」从一个上下文里拆开：Viewer 子 agent 按自然语言查询抽取任务相关代码片段，Editor 子 agent 接收自然语言编辑指令直接改文件（主 agent 不再写格式敏感的 search/replace）。SWE-Bench Verified 500 个真实 GitHub issue 上 resolve rate 69.9%→72.0%（+2.1pp），总成本 $243.7→$200.1（-17.9%），编辑成功率 93.4%→96.9%（+3.5pp），主 agent 非缓存 input token 276.7K→181.3K（-34.5%）。
+- **证据**：论文 Table 1（500 instances，每配置跑 3 次取平均）逐行消融：Baseline(Anthropic str_replace_editor) 69.9 / $243.7 / viewer 5.78 / editor 2.86 / edit succ 93.4；+Viewer 70.3 (+0.4) / $225.0 (-7.7%) / 4.26 / 2.75 / 94.3；+Editor 71.3 (+1.4) / $268.3 (+10.1%) / 7.78 / 2.33 / 96.1；SWE-Edit 72.0 (+2.1) / $200.1 (-17.9%) / 7.49 / 2.37 / 96.9。Table 6 给出 276.7K→237.1K（仅 Viewer）→181.3K（两者）。正文：Viewer 平均只返回请求内容的 39.7%（-60.3% 代码面）；平均 7.49 次 viewer 调用/实例说明检索不全会自然重查。基线是 SWE-Bench Verified（500 个真实仓库 issue），评测完全基于执行（跑测试）而非 LLM 裁判。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 4。消融数字全部吻合，且自带反面证据（单上 Editor 成本 +10.1%）；对大仓「看/改解耦」是可直接 A/B 的高价值改造。
+- **测试设计**：对照组 = 现有 harness（模型自己 cat + 自己写 search/replace）；实验组 = 同模型、同任务、同 token 预算，把 view 与 edit 拆成两个子 agent（先可用小模型承接）；在同批 SWE-bench Verified 风格的大型仓库 issue 上跑 3 次，比较 resolved rate、edit success rate、总 token 与美元成本三项。
+- 备注：反面证据：单独上 Editor 会让主 agent 更「探索」（viewer 调用 5.78→7.78，成本 +10.1%），必须配 Viewer 才有净收益；resolve rate 上两者非可加（+1.4pp 单独 vs +2.1pp 组合），主要收益体现在成本与编辑可靠性；论文自己也把 GPT-5 提到 GPT-5-mini 只 +0.4pp 视为「大模型堆料不划算」的反例。
+
+#### S174 · 建一个比端到端 SWE-Bench 便宜两个数量级的「编辑器级代理评测」，用它做模型档位—成本帕累托选型
+
+- **大类/来源**：工具与接口（评测方法）｜[SWE-Edit 发布的 PR-Edit 轻量评测 + Table 3 / Table 4 / Figure 4（arXiv 2604.26102v2）](https://arxiv.org/abs/2604.26102)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：PR-Edit 的分数与 SWE-Bench resolve rate 排序一致（Pearson r=0.98, n=4），可作为迭代编辑器的快速信号；据此完成档位选型：Qwen3-8B 68.5% resolved / $231.7 / edit succ 68.6%，Qwen3-8B+GRPO 69.9% / $215.9 / 81.1%，GPT-5-nano 70.0% / $207.1 / 82.0%，GPT-5-mini 72.0% / $179.6 / 96.9%。
+- **证据**：论文明确说端到端 SWE-Bench 一次约 $200，故以 PR-Edit 做快速信号；PR-Edit 三个指标为 Format Success / GPT Grader（GPT-4.1 评编辑正确性）/ Normalized Match（规范化空白与去注释后精确匹配）；Figure 4 显示三个指标对都随 SWE-Bench 表现单调排序；论文承认 4 个点做相关估计样本太小，只能当模型选择信号。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 4 / 可测性 4。核心相关性仅 4 个点，证据强度有限，但 claim 如实携带该 caveat；「先验证代理指标相关性再进 A/B」的用法稳妥。
+- **测试设计**：先在自家 200~500 条大型仓库 issue 任务上建代理集，用同一批任务同时跑「代理指标」与「端到端 resolved」算相关性；只有相关性达标的代理指标才允许进入 A/B 流水线，之后每个候选格式/档位组合只跑代理集。
+- 备注：反面/风险：GPT Grader 是 LLM 裁判，需要人工抽检校准；PR-Edit 只覆盖「编辑」不覆盖「是否解决 issue」，会漏掉定位与规划类失败（论文自己的实验显示格式错误只是关键路径上若干失败模式之一）；「r=0.98」只有 4 个点，不能当精确相关系数用。
+
+#### S175 · 跨 harness 的模型排名会反转：按「模型×harness」配对选型，并对畸形工具调用多的模型单独配 harness
+
+- **大类/来源**：工具与接口 / 评测方法｜[Finding the Right Fit: Model-Harness Interactions across Agent Tasks（arXiv 2610.00917, 2026-10-01）](https://arxiv.org/abs/2610.00917)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：评估 66 种配置（OpenHands、DeepSeek Harness、PI、openJiuwen 四个可配置 harness × 五个模型，外加原生 Codex-GPT 与 Claude Code-Claude 配对）在 TUA-Bench、ALE-CLI、Terminal-Bench 4 上的表现：模型排名跨 harness 反转——Terminal-Bench 4 上 Claude 在 OpenHands 里领先 GPT 7.94 分，却在 PI 里落后 30.16 分；四个模型的最优 harness 会随 benchmark 改变；模型自己厂商的 harness 并不总是最优；成本更高也不保证分更高。
+- **证据**：论文摘要给出全部数字与机制解释：模型几乎都自己动手修，差别在于 harness 把失败以什么形式回喂给模型；GPT 最吃 PI 的精简脚手架，而「经常发出畸形工具调用」的 Kimi 在 openJiuwen 上最好；openJiuwen 给了 Kimi 在三个基准上全部最高分，领先 5.61–11.11 分。我另外核实了官方代码仓库 github.com/liyix/finding-the-right-fit（HTTP 200，README 原文）：「any of six agent harnesses」为 OpenHands、DeepSeek Harness (DSH)、PI、openJiuwen、Codex、Claude Code，三个 CLI 基准的任务数分别是 TUA-Bench 120 条、ALE-CLI 99 条、Terminal-Bench 4 63 条，并公开 6,204 条打分轨迹（66 configurations × 各自任务集，results/task_level.tsv 与 results/config_cost_summary.csv 在 HF 数据集 yixuanli97/finding-the-right-fit 内；该 HF 链接在我本机网络下 curl 超时未验证，GitHub 仓库 README 中的徽章与正文均指向它）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 4。数字全部吻合；「模型×harness 配对排名会反转」对黑灯工厂的模型分配是直接的反直觉警告，外推到大仓需自测（条目已声明）。
+- **测试设计**：对照组 = 固定 harness 下比较各模型；实验组 = 每个模型都跑全部 harness；在自家大仓库 issue 集上同时统计 pass rate、每任务成本、畸形工具调用率，最终报告配对排名而非模型排名。
+- 备注：反面/局限：基准是终端/CLI 类任务（TUA-Bench、ALE-CLI、Terminal-Bench 4），不是大型真实仓库编码任务，外推需复测；PI/openJiuwen 等 harness 迭代很快，配对结论有时效性；与 SWE-Edit 的 editor 缩放结论一致——「更大更贵」不等于更好。与本工作区已有材料直接相关：工作区已有《openJiuwen（九问）开源项目调研报告》，而该论文正把 openJiuwen 列为四个受测 harness 之一。
+
+#### S176 · 工具接口（CLI vs MCP）选型看「失败成本」与「agent 是否真的走了被指派的接口」，而不是只看 token 价差
+
+- **大类/来源**：工具与接口｜[The Scaffolding Matters More Than the Interface: A Controlled Comparison of MCP and CLI Tool Use Across Seven Agent Scaffoldings, Five Language Models, and One Software Task（arXiv 2608.08654, 2026-08-09）](https://arxiv.org/abs/2608.08654)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：同一个固定软件任务（对私有在线 git 仓库的 6 个操作）跨 7 个 agent scaffold × 5 个语言模型跑 MCP 与 CLI：两个 scaffold 根本不支持 MCP、全部用 CLI 完成，比那 5 个支持 MCP 的 scaffold 便宜 5.0×–28×（比较的是完全没挂 MCP server 的 CLI 运行）；两种接口的差异主要体现在失败成本——MCP 运行花掉的钱里 12.9% 没有换来任何已完成工作，CLI 只有 2.2%；但失败频率两者相当；13 个严格配对的 MCP→CLI 成本比跨度 0.43×–29×，作者称这个比较「极不稳定」；且 agent 经常无视被指派的接口。
+- **证据**：论文摘要给出全部数字与验证方法：完成情况通过检查仓库真实状态判定，而不是相信 agent 自报；harness、任务、验证器与完整数据集开源。作者结论是「scaffolding 效应大于接口效应」。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 4 / 可测性 4。数字吻合但证据基于单一小任务；其方法论（核查真实仓库状态、核查 agent 是否真走被指派的接口）是可照搬的高价值实践。
+- **测试设计**：对照组 = 同一任务强制 CLI；实验组 = 同一任务强制 MCP；用轨迹断言「实际走的接口」再统计每任务成本与失败成本，而不是只统计 agent 自报；同时对被指派接口做一次 post-hoc 核查并把不服从率作为一等指标。
+- 备注：反面/局限：只有一个软件任务、6 个操作、私有仓库，不是大型真实仓库编码任务，外部效度有限；但其方法论（检查仓库真实状态、核查 agent 是否真的用了被指派接口）值得直接照搬。结论与 2607.22585、2610.00917 一致：scaffold 效应大于接口效应，所以先调 harness 再谈协议。
+
+### 3.4 执行与沙箱（7 条，A 级 1 条）
+
+#### S045 · Docker 沙箱默认隔离 + 镜像分层哈希缓存复用（lock tag/source tag），任意用户镜像即插即用
+
+- **大类/来源**：执行与沙箱｜[OpenHands 平台论文 + sandbox/runtime 代码与官方 sandboxes 文档](https://docs.openhands.dev/openhands/usage/sandboxes/overview)｜证据等级：benchmark→**anecdotal**（K3 修正）｜定级：**B**
+- **承诺改进**：每个会话在 'a securely isolated docker container sandbox' 内执行，内置 bash、Jupyter IPython 与 Playwright Chromium；支持把执行 API 装进任意用户镜像（'runtime based on arbitrary docker images'）。配置默认 RUNTIME=docker；runtime 镜像构建按依赖 lock 文件与源码哈希打分层标签，已存在则直接复用不重建（'Will try to reuse it as is'）。另有 process 沙箱定位为 'unsafe, but fast'
+- **证据**：代码取证（openhands-ai==0.39.0 wheel）：core/config/app_config.py:60 runtime 默认 'docker'；core/config/sandbox_config.py 默认基础镜像 nikolaik/python-nodejs:python3.12-nodejs22、timeout=120、pause_closed_runtimes=True；runtime/utils/runtime_build.py:172-178 lock_tag='oh_v{version}_{hash(lock_files)}'、source_tag 在其上再叠 source_files 哈希，命中即复用。官方文档（docs.openhands.dev/openhands/usage/sandboxes/overview，2026-10 抓取）：Docker 为推荐默认、process='unsafe, but fast'、remote 用于托管部署。论文 arXiv:2407.16741v3 描述沙箱内 API server 组件
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 5 / 可测性 4。机制性承诺全部独立复核属实：论文 v3 含 'securely isolated docker container sandbox'、bash/Jupyter IPython/Playwright Chromium、'arbitrary docker images'、沙箱内 API server；文档页含 RUNTIME=docker 默认与 process='unsafe, but fast'；代码取证经本地解包 openhands-ai==0.39.0 核实：app_config.py:60 runtime 默认 'docker'、sandbox_config.py 默认镜像 nikolaik/python-nodejs:python3.12-nodejs22+timeout=120+pause_closed_runtimes=True、runtime_build.py:172/178 lock_tag='oh_v{version}_{hash(lock_files)}' 与 source_tag 叠加、:74 'Will try to reuse it as is'。镜像复用是并行产线吞吐前提，但无性能数字且 evidenceGrade 标高了一档，定 B。
+- **测试设计**：同一大仓库任务集：对照组每会话冷构建环境，实验组用 lock/source 哈希预建镜像复用；对比会话启动时间、每任务总时长与成本（解决率应不变）
+- 备注：容器逃逸是通用风险，需叠加 seccomp/网络隔离（OpenHands 另有 security analyzer 与 confirmation 模式，本次调研未深挖）；process 模式快但不隔离，只适合纯计算型可信任务；修正建议：evidenceGrade 由 'benchmark' 改为 'anecdotal'；把沙箱机制表述的出处明确标为论文 arXiv:2407.16741v3 而非 sandboxes 文档页。
+
+#### S054 · 技能供应链防护：社区技能入库前过静态扫描，运行时按需判定
+
+- **大类/来源**：执行与沙箱｜[arXiv: SkillGate: Cost Efficient Runtime Malicious Skill File Detection in Coding Agents (2026-07) + arXiv: Scanning the Harness (2609.07360)](https://arxiv.org/abs/2607.25619)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：技能文件是从公共 registry 一条 npx 命令就能装、且无实质安全审查的攻击面：恶意 SKILL.md 可以悄悄改写 agent 行为、外泄凭据、往生成代码里注入后门。可用「正则预筛 + LLM 判定」的混合网关在安装前拦截，并靠安全信号跳过 LLM、被标记文件只送匹配片段而非全文来压成本。
+- **证据**：SkillGate 在 SkillsBench（n=1,650，9.1% 为恶意）上 F1=0.817、FPR=1.13%，相对全文件审查减少 77% 的 LLM 输入 token，threshold-independent AUPRC 0.830 对比现有两个工具的 0.144/0.162（高 5~6 倍）。论文称公共 registry 中已有数百个恶意技能包与有组织的凭据窃取活动。另一项对 3,171 个 GitHub 仓库的研究（2,660 个装配 setups + 511 个 skill 集合）发现：9.8% 的 setups 存在未固定的 MCP 包声明、2.5% 存在宽泛执行授权、3.8% 存在宽泛的技能工具预授权，三者并集覆盖 409 个 setups（15.4%），带 MCP 配置的 setups 中 24.5% 含未固定声明。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 3。两篇来源数字全部命中且局限转述诚实，供应链网关是规模化用社区技能的前置门槛，定 A。
+- **测试设计**：在有/无网关两组下用同一批真实技能包（含已知恶意样本）跑安装与执行，比较拦截率、误报率与每包扫描成本；另做一次「恶意技能进入真实任务轨迹」的红队回归。
+- 备注：Scanning the Harness 作者自陈：运行时后果与召回率均未测量，只验证了仓库声明层面的配置暴露；SkillGate 的 FPR 1.13% 是在特定基准分布下的结果，误报在黑灯大规模自动拦截时可能造成技能大面积不可用。
+
+#### S059 · MCP 供应链安全：工具投毒/事后篡改/跨服务器遮蔽的检测与隔离
+
+- **大类/来源**：执行与沙箱｜[Invariant Labs: MCP Tool Poisoning Attacks（配套综述：Model Context Protocol: Landscape, Security Threats, and Future Research Directions, arXiv 2503.23278）](https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：工具描述可嵌入用户不可见但模型可见的注入指令（演示：加法工具的隐藏指令诱导模型读取 mcp.json 与 SSH 私钥经参数外传，Cursor 实测成立）；rug pull 在用户审批后修改描述绕过信任；跨服务器 tool shadowing 在恶意工具描述中为可信工具（如 send_email）编造行为实现劫持；综述（Hou et al. 2025）系统化出 4 类攻击者、16 种威胁场景覆盖服务器全生命周期。
+- **证据**：攻击方在真实客户端（Cursor）上的复现实验与防御建议（完整展示描述、描述哈希/版本锁定、跨服务器数据流隔离）；综述为系统分类+真实案例研究，无对照实验数字。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 4 / 可测性 3。攻击演示与综述分类均属实，是接入层红线但无效果量化，红队集可自建，定 B。
+- **测试设计**：构建红队集（带毒描述/事后篡改/跨服务器遮蔽三类样本），验证 harness 的描述哈希锁定、变更告警与跨服务器数据流限制是否全部拦截。
+- 备注：防御有真实成本：版本锁定破坏缓存与自动更新、隔离增加编排复杂度；可用开源扫描器 MCP-Scan 作基线；综述为学术分类，威胁量化数据缺。
+
+#### S073 · 每任务一次性沙箱容器：默认断网+依赖白名单（跑得起来且跑不出去）
+
+- **大类/来源**：执行与沙箱｜[Introducing Codex（OpenAI 官方博客，codex-1）](https://openai.com/index/introducing-codex/)｜证据等级：benchmark→**anecdotal**（K3 修正）｜定级：**B**
+- **承诺改进**：每个任务在独立沙箱容器中运行：网络访问默认全禁，仅在 setup 阶段按依赖白名单安装；agent 在『能跑测试但碰不到外网』的环境里完成读代码-改-跑测试循环
+- **证据**：OpenAI 官方博客（本会话经网页阅读器抓取正文）：每任务独立环境、"网络访问默认禁用"并在 setup 阶段按白名单装依赖、脚注说明剔除评测使用样例测试的 SWE-bench 条目。官方公布的 SWE-bench Verified 成绩 72.1% 来自多个二手报道交叉转述（openai.com 对直接抓取返回 403、web.archive.org 本环境不可达，未能核对原文图表），采用时请以原文为准
+- **K3 验证结论**：链接**无效**；claim 一致；证据强度 2 / 大型仓库价值 5 / 可测性 4。链接本环境打不开但经二手报道佐证属实；设计本身是并行产线标准底座、价值高但无受控证据，定级 B。
+- **测试设计**：同任务集两组：共享工作区直跑（对照） vs 每任务一次性容器+默认断网+白名单；比较解决率、环境失败率、网络外联/逃逸事件数、单任务成本
+- 备注：断网会卡住需要拉包/查文档的任务（需白名单或镜像预装）；72.1% 数字未能从原文直接核实为本调研的验证缺口；另有社区报告过沙箱逃逸漏洞，说明边界需持续测试；修正建议：evidenceGrade 建议由 benchmark 降为 anecdotal（沙箱设计为官方产品描述，无受控数字；72.1% 未核实且不在 claim）；如能访问，可补 developers.openai.com/codex/cloud 文档作为规范链接。
+
+#### S074 · OS 级双边界沙箱（文件系统只读边界+网络代理白名单），减少 84% 权限打断
+
+- **大类/来源**：执行与沙箱｜[Making Claude Code more secure and autonomous（Anthropic Engineering, 2025-10）](https://www.anthropic.com/engineering/claude-code-sandboxing)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：用操作系统原语（Linux bubblewrap / macOS Seatbelt）把 agent 及其子进程限制在工作目录可写+经代理域白名单上网，官方内部数据称权限打断减少 84%，从而让 agent 从『每步问人』变为自主执行
+- **证据**：Anthropic 工程博客（已核对原文）："safely reduces permission prompts by 84%"（内部使用统计，非公开基准）；论证双边界缺一不可——只隔离网络则被注入的 agent 可偷 SSH 密钥，只隔离文件系统则可逃逸后恢复外网；sandbox-runtime 已开源（anthropics/sandbox-runtime）
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 4 / 可测性 4。84% 是厂商内部数字但机制论证清晰，OS 级双边界是无人值守并行的自主性地基，定级 B。
+- **测试设计**：同一任务集两组：全权限提示模式（对照） vs FS+网络双边界沙箱；测量打断次数、无人值守完成率、越界行为捕获数；再单开一组只隔离网络做安全性对照
+- 备注：84% 是 Anthropic 内部使用数据，无公开对照实验；代理白名单维护有成本，私有源/内网依赖需显式放行；逃逸风险需持续红队；修正建议：evidence 中仓库名更正为 anthropic-experimental/sandbox-runtime（官方原文为 open source research preview）。
+
+#### S081 · 沙箱与审批分档建模，并把「当前沙箱模式 + 审批策略 + 网络状态」显式写进 system prompt
+
+- **大类/来源**：执行与沙箱｜[Codex CLI (openai/codex)](https://github.com/openai/codex/blob/c419fd01a70dd1d05356da443ac44328bda2e6f4/codex-rs/protocol/src/config_types.rs)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：Codex 把沙箱与审批解耦成两个独立维度：SandboxMode 三档 read-only（默认）/ workspace-write / danger-full-access；AskForApproval 四档 unless_trusted / on-request（默认）/ never / granular（按类别细粒度 allow/deny）。关键工程细节是这两者不是「纯后端策略」——每一档都会渲染成一段 system prompt 文本注入给模型，让模型知道当前边界，从而自行选择是否申请提权，而不是靠后端默默拒绝。
+- **证据**：代码级事实：protocol/src/config_types.rs:104-114 定义 SandboxMode，ReadOnly 带 `#[default]` 标记（默认只读）；protocol/src/protocol.rs:1097-1120 定义 AskForApproval，OnRequest 带 `#[default]`，Never 的文档注释为「Never ask the user to approve commands. Failures are immediately returned to the model, and never escalated to the user for approval.」；注入证据在 codex-rs/prompts/templates/permissions/ 下：sandbox_mode/workspace_write.md 正文为「Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `workspace-write`: The sandbox permits reading files, and editing files in `cwd` and `writable_roots`. Editing files in other directories requires approval. Network access is {{ network_access }}.」；approval_policy/never.md 为「Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.」；approval_policy/unless_trusted.md 为「`approval_policy` is `unless-trusted`: The harness will require user approval before running commands unless an explicit exec policy rule allows them.」。协议层还定义了三种沙箱实现（protocol/src/sandbox.rs:28-34：MacosSeatbelt / LinuxSeccomp / WindowsRestrictedToken / WindowsMxc）。本条为机制与默认值事实，无对照实验数字。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 4 / 可测性 4。沙箱×审批解耦与 prompt 注入机制经源码与模板原文逐字核实，设计可直接借鉴，效果需自研 A/B 验证。
+- **测试设计**：对照组：沙箱=read-only、审批=on-request（codex 默认）；实验组：workspace-write + never（无人值守）或 workspace-write + granular(按类别)。在同一批仓库上比较任务完成率、被拒命令次数、平均额外轮数、以及是否发生越权写（用文件系统审计判定）。
+- 备注：反面风险：把审批状态写进 prompt 会占掉固定 context；且模型在 'never' 下会被反复拒并浪费轮数（codex 的 never 模板明确要求模型不要再申请提权，但仍可能重试）。沙箱实现差异（seatbelt/seccomp/container）会影响 agent 观察到的错误信息，属于隐藏变量，A/B 必须固定同一沙箱实现。另：未找到 codex 官方公开的沙箱/审批对照基准数字。
+
+#### S154 · 影子 git checkpoints（默认开启，会话级/任务级隔离，配自动批准使用）
+
+- **大类/来源**：执行与沙箱｜[Cline checkpoints 与 Roo Code checkpoints](https://github.com/cline/cline/blob/main/docs/core-workflows/checkpoints.mdx)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：每次工具调用后把工作区快照提交到独立于用户 git 历史的影子仓库，支持 Compare/Restore（只回滚文件/只回滚对话/两者都回滚）；官方称这让自动批准（auto-approve）变得可行——错误成本趋近于零。两项目均默认开启。
+- **证据**：Cline docs/core-workflows/checkpoints.mdx：Checkpoints are enabled by default，影子 git 提交，三种恢复选项；同页 Note 警告超大仓库下 checkpoint 会显著占用存储并拖慢速度。实现细节 sdk/packages/core/src/hooks/checkpoint-hooks.ts:11-49：影子提交用 stash 实现（消息前缀 cline checkpoint session=），per-session 持久化 GIT_INDEX_FILE scratch 目录避免每轮重新哈希全部未跟踪文件，14 天过期回收。Roo 侧 src/services/checkpoints/RepoPerTaskCheckpointService.ts:6-12 每任务一个影子仓库（shadowDir/tasks/{taskId}/checkpoints），ShadowCheckpointService.ts:158-183 用真实 git + core.worktree 指向工作区，excludes.ts 硬编码排除 node_modules/dist/媒体/锁文件等；检测到嵌套 git 仓库直接禁用 checkpoints；初始化超时默认 30s（可调 10-60s）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 5 / 可测性 4。官方文档描述全部属实但无任何基准数字，作为大规模并行的回滚基建设施价值高、证据强度低。
+- **测试设计**：A/B：auto-approve + checkpoints vs auto-approve 无 checkpoints（靠 git stash 兜底）vs 逐步审批，在同一批任务上比较端到端时长、最终通过率与不可恢复失败率；另测大型仓库（>10 万文件）下 checkpoint 每轮耗时。
+- 备注：无任何公开基准数字；Roo 禁用嵌套 git 仓库（monorepo 常见子模块会踩）；Cline 明示大仓库要手动关。落地成本中等：git 环境消毒（清 GIT_INDEX_FILE 等）、排除规则、per-task 隔离都要自己实现。；修正建议：claim 中「支持 Compare/Restore（只回滚文件/只回滚对话/两者都回滚）」建议明确标注「（Cline 三选项；Roo 仅文件/文件+任务两选项）」。
+
+### 3.5 反思与自修正（9 条，A 级 4 条）
+
+#### S022 · Reflexion：语言化反思存入情景记忆（经典）
+
+- **大类/来源**：反思与自修正｜[Reflexion 论文（arXiv 2303.11366，NEC 等）；Reflexion: Language Agents with Verbal Reinforcement Learning (Shinn et al., NeurIPS 2023)；Reflexion: Language Agents with Verbal Reinforcement Learning (NeurIPS 2023)](https://arxiv.org/abs/2303.11366)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：HumanEval pass@1 达 91%，超过当时最强的 GPT-4 直接生成（80%）；机制：不更新权重，把对失败的口头反思存入情景记忆缓冲区供后续尝试使用 ｜ 〔并集·Reflexion(B分片)〕把执行失败的测试信号转成语言反思存入情景记忆再重试，HumanEval pass@1 达 91%，超过当时 GPT-4 的 80% ｜ 〔并集·Reflexion(C分片,含消融)〕不改权重，用自然语言『自反思』把环境反馈写进情景记忆以诱导下一轮更好决策；HumanEval pass@1 达 91.0，超过当时 SOTA GPT-4 的 80.1。
+- **证据**：arXiv 摘要（本次已核实）：HumanEval 91% vs 80%；支持标量/自由文本、外部/内部模拟等多种反馈源；在顺序决策、编码、推理任务上均优于基线 ｜ 〔并集·Reflexion(B分片)〕论文摘要（搜索结果原文引用）："Reflexion achieves a 91% pass@1 accuracy on the HumanEval coding benchmark, surpassing the previous state-of-the-art GPT-4 that achieves 80%"；ALFWorld/HotPotQA 同样提升 ｜ 〔并集·Reflexion(C分片,含消融)〕论文 Table 1（pass@1）：HumanEval(PY) 基线 GPT-4 80.1 → Reflexion 91.0；HumanEval(Rust) 60.0 → 68.0；MBPP(Rust) 70.9 → 75.4；LeetcodeHard(PY) 7.5 → 15.0。消融（§4.2 分析）：仅加『情景记忆重放』比『加自反思』低 8 个百分点绝对值，支持『反思引导的精修 > 单纯重放』。Table 2 给自生成单元测试套件的混淆矩阵（HumanEval PY FP=0.01，MBPP PY FP=0.16）。反馈可为标量或自由文本、可来自外部或内部模拟。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 5。经典同行评审证据且含反面消融（测试假阳性致退化）；失败反思注入重试是最便宜的记忆策略之一，直接 A/B。
+- **测试设计**：A/B：失败后裸重试 vs 重试前注入结构化反思，测同任务重试成功率与收敛轮数
+- 备注：2023 经典，提升依赖强基座与可靠外部反馈信号（编码域即测试结果）；重要反面证据：ExpeL 消融发现把 Reflexion 式反思混入 insights 反而降分（HotpotQA 32.0→29.0），反思文本含幻觉时是毒药，入库前需过滤验证 ｜ 〔并集·Reflexion(B分片)〕HumanEval 只有 164 题且数字为 2023 年水平；反思文本质量不稳定时可能固化错误结论，需配合测试执行信号而非替代 ｜ 〔并集·Reflexion(C分片,含消融)〕反面证据：MBPP(PY) 上 Reflexion 反而从 80.0 降到 77.1，作者归因于自生成测试套件质量差（MBPP PY 测试假阳性率 16.3%，HumanEval PY 仅 1%）；假阳性（测试全过但实现错）会让 agent 提前提交错误答案。反思基于模型自归因，可能把错误教训写进记忆并长期污染后续任务，应给反思条目设 TTL/淘汰与冲突覆盖机制。成本：每轮多一次 LLM 调用 + 一次测试套件生成。论文正文给出代码 https://github.com/noahshinn024/reflexion（本次抓取 raw README 返回 404，未能独立验证仓库可访问性，故以 arXiv 页作为权威链接）。；修正建议：notes 中『MBPP(PY) 上 Reflexion 反而从 80.0 降到 77.1』改为『从 80.1 降到 77.1』。
+
+#### S070 · Self-Debugging：执行反馈 + 自我解释在线修错
+
+- **大类/来源**：反思与自修正｜[Teaching Large Language Models to Self-Debug (Chen et al., ICLR 2024)；Teaching Large Language Models to Self-Debug (ICLR 2024)](https://arxiv.org/abs/2304.05128)｜证据等级：benchmark｜定级：**B**
+- **承诺改进**：在提供单元测试的基准上，Self-Debugging 把基线准确率提升最高 12%（MBPP、TransCoder）；文本反馈（rubber-duck 调试）在无测试反馈的 Spider 上仍稳定提升 2-3%、最难问题提升 9%；且能匹敌生成 10 倍以上候选程序才取优的基线（样本效率） ｜ 〔并集·Self-Debugging(C分片)〕模型生成代码后利用执行反馈与自我解释定位修复：MBPP/TransCoder 基线最高 +12%；Spider（无单测）整体 +2~3%、最难档 +9%；效果匹配『生成 10 倍候选程序』的基线。
+- **证据**：论文摘要（已核对原文）：TransCoder/MBPP 上提升 up to 12%；Spider +2-3%（最难子集 +9%）；样本效率：self-debugging 匹配或超过 10x 采样的基线。实验设置为 GPT-3.5/GPT-4 多轮 few-shot 调试，反馈源为单位测试执行结果、代码逐行/逐块解释或二者结合 ｜ 〔并集·Self-Debugging(C分片)〕论文摘要原文引句：Spider 'consistently improves the baseline by 2-3%, and improves the prediction accuracy on problems of the hardest level by 9%'；TransCoder/MBPP 'improves the baseline accuracy by up to 12%'；'can match or outperform baseline models that generate more than 10x candidate programs'。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 3 / 可测性 5。经典同行评审证据、数字吻合，但执行反馈循环已是现代 harness 标配内环、增量价值中等，定级 B。
+- **测试设计**：同一模型同一任务集，对照组一次性生成+仅提示词自查，实验组失败后带测试输出重试 1-3 轮；比较解决率、平均轮次与 token 成本
+- 备注：经典论文（2023），数字在当今强模型上可能收窄；无测试可用时收益骤减（Spider 仅 2-3%），大仓库任务要先解决『能不能跑起来』 ｜ 〔并集·Self-Debugging(C分片)〕依赖 harness 能采集并结构化回传真实执行反馈；解释本身增 token；无单测的改动收益显著变小（Spider 证据：+2~3% 远低于有测试场景）。
+
+#### S071 · 无外部信号的内在自纠错是负收益（Cannot Self-Correct，经典负面）
+
+- **大类/来源**：反思与自修正｜[Large Language Models Cannot Self-Correct Reasoning Yet (Huang et al., ICLR 2024)；Large Language Models Cannot Self-Correct Reasoning Yet (ICLR 2024, Huang et al.)](https://arxiv.org/abs/2310.01798)｜证据等级：ablation｜定级：**B**
+- **承诺改进**：仅靠模型自身能力、无外部反馈的『自我检查并修正』往往无效甚至有害：模型会把原本正确的答案改错（性能有时在自我修正后下降） ｜ 〔并集·Cannot Self-Correct(C分片,含Table2/3数字)〕不给外部信号、只靠模型自己判断对错的『内在自我纠错』在所有被测基准上都降低正确率；文献中报告的提升多源于评估设定问题（oracle 标签 / 不等量响应 / 次优初始 prompt）。
+- **证据**：论文摘要（已核对原文）："LLMs struggle to self-correct their responses without external feedback"、"at times, their performance even degrades after self-correction"；为 GSM8K/HotPotQA 上的受控对照实验（ICLR 2024）。摘要未给出具体百分点数字，本次未进一步抓取正文表格 ｜ 〔并集·Cannot Self-Correct(C分片,含Table2/3数字)〕Table 3（内在自我纠错）：GPT-3.5 GSM8K 75.9→75.1（1 轮）→74.7（2 轮）；CommonSenseQA 75.8→38.1→41.8；HotpotQA 26.0→25.0；GPT-4 GSM8K 95.5→91.5→89.0、HotpotQA 49.0→49.0→43.0；GPT-4-Turbo GSM8K 91.5→88.0→90.0；Llama-2-70B GSM8K 62.0→43.5→36.5。原文结论：'after self-correction, the accuracies of all models drop across all benchmarks'。Table 2（oracle 标签）：GPT-3.5 GSM8K 75.9→84.3、CSQA 75.8→89.7、HotpotQA 26.0→29.0；GPT-4 95.5→97.5、82.0→85.5、49.0→59.0。GSM8K 上 GPT-3.5 有 74.7% 的情况保持原答案，其余情况把对的改错比把错的改对更常见。Table 1 逐条归因：RCI/Reflexion=使用 oracle 标签；Multi-Agent Debate=与 self-consistency 比较不公平；Self-Refine=初始 prompt 设计次优。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 3 / 可测性 4。负面经典证据可靠，作为「无信号不触发自纠」的设计约束价值明确但非直接提分策略，定级 B。
+- **测试设计**：设三组：一次性生成（对照）、无外部信号提示词自查（预期不升或降）、跑测试带输出修正（预期升）；验证 harness 中『自查』开关的真实增益
+- 备注：重要负面结果：自我修正的收益必须来自外部信号（测试、编译器、用户反馈）；本调研未能取到正文中 GSM8K 的具体下降幅度 ｜ 〔并集·Cannot Self-Correct(C分片,含Table2/3数字)〕论文对象是推理任务（GSM8K/CommonSenseQA/HotpotQA）而非代码，编码场景有编译/测试等外部信号时结论不直接适用，可与 CRITIC 互为印证；但『无信号不触发自纠』应作为 harness 默认策略，仅在工具反馈可用时允许修订。同作者批判性综述《When Can LLMs Actually Correct Their Own Mistakes?》（TACL, arXiv 2406.01297）进一步指出既有自我纠错研究普遍存在定义不清、评估不公平从而高估的问题。；修正建议：evidence 中将 GPT-4-Turbo/Llama-2-70B 两行标注为 Table 4（内在自我纠错多模型扩展表），Table 3 仅含 GPT-3.5/GPT-4。
+
+#### S085 · CRITIC：工具交互式批评（执行信号 vs 纯语言自评的直接对照）
+
+- **大类/来源**：反思与自修正｜[CRITIC: Large Language Models Can Self-Correct with Tool-Interactive Critiquing (ICLR 2024)](https://arxiv.org/abs/2305.11738)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：只有把校验外包给工具（Python 解释器等）再据此修正，LLM 的自我修正才稳定增益；去掉工具改用纯语言自评后，增益消失甚至转负。
+- **证据**：Table 2（数学程序合成，exact match）：ChatGPT PoT 72.5 → CRITIC 78.2（GSM8K）、75.0 → 89.0（TabMWP）；LLaMA-2-70B TabMWP 59.0 → 75.0（+16.0）、GSM8K 59.3 → 62.3；text-davinci-003 GSM8K 70.1 → 72.2、SVAMP 84.0 → 80.7（-3.3）。消融『CRITIC w/o Tool』：text-davinci-003 GSM8K 68.3（-1.8 vs PoT）、ChatGPT GSM8K 77.0（+4.5，明显低于带工具的 +5.7）。Table 10 引用 Madaan et al.：Codex+PAL 71.3 → +Self-Refine 26.7（-44.6），Self-Refine*（oracle 选对才修）76.2。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 5 / 大型仓库价值 4 / 可测性 4。同行评审（ICLR 2024）且同文含受控消融，数字逐表核对全中，为『执行信号优于口头自评』提供了最硬的一类证据。
+- **测试设计**：三臂等预算 A/B：执行反馈修正 vs 无执行反馈的纯语言自评 vs 盲重采样安慰剂；另加一臂『修正前强制运行 lint/类型/测试、模型只对工具报错逐条定点修正』，比解决率、token、无效修复率与二次破损率。
+- 备注：任务集是 GSM8K/SVAMP/TabMWP 的程序合成（不是仓库级代码）；Table 10 的 -44.6 是引用 Madaan et al. 数字的对照，非本文复现。实现成本高：需要可执行沙箱与错误消息结构化通道。工具覆盖不到的问题（设计合理性、可维护性）仍需 LLM 评审补充；警惕过度修改原本正确的代码，应限定只改工具报错处。代码：https://github.com/microsoft/ProphetNet/tree/master/CRITIC（本次 raw README 返回 200，已验证可访问）。
+
+#### S086 · 安慰剂对照：盲重采样优于自修复（小模型代码任务，反面证据）
+
+- **大类/来源**：反思与自修正｜[Try Again, Don't Look Back: Blind Resampling Outperforms Self-Repair in Small Code Models](https://arxiv.org/abs/2607.26117)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：自修复的收益被『多试一次』混淆掉：在 MBPP+ 上盲重采样（不给模型看上次失败输出）在 1.5B/3B/7B 三个尺度上都不劣于任何自修复条件，并且省 2.5–5.5 倍 token。
+- **证据**：安慰剂对照设计，4 个等预算重试条件：盲重采样 / 无内容失败通知 / 真实执行反馈 / 执行反馈 + 语言自反思。盲重采样在 <7B 最强，7B 与最佳条件统计打平，token 少 2.5–5.5 倍；把模型自己的失败尝试回灌在 1.5B 上损失 6.1 个点（p=0.006）；执行反馈相对安慰剂无可测增益；锚定机制：看过自己上次尝试后 33–68% 的重试产出几乎相同的程序，盲重采样仅 2–14%；注入其它任务的检索解对结果影响 ≤ ±3.5 点，把伤害定位到自我条件化而非上下文长度。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 4 / 可测性 4。安慰剂对照设计干净、摘要数字与 claim 全部吻合，直接威胁『反思回路默认开』的产线假设；局限（小模型/MBPP+）已在 notes 如实标注，复测成本低故可落地性高。
+- **测试设计**：任何『带反馈重试』的 A/B 都必须加安慰剂臂：同 token 预算下 (a) 盲重采样、(b) 只回灌错误文本、(c) 回灌执行输出、(d) 回灌执行输出 + 自反思，否则无法区分『反馈的信息量』与『多一次尝试』。
+- 备注：证据仅覆盖 1.5B–7B 小模型与 MBPP+（函数级），作者未验证前沿模型与仓库级任务；结论方向与 2511.02309（顺序精修优于并行自洽）相反，差异很可能来自模型规模与任务类型，必须在自家 harness 上同时复测两条曲线。
+
+#### S087 · LLM-as-judge 无法可靠为反思『定时』（反面证据）
+
+- **大类/来源**：反思与自修正｜[The Saturation Trap and the Subjectivity of Intervention Timing: Why Affect-Based Triggers and LLM Judges Fail to Time Interventions on Autonomous Agents](https://arxiv.org/abs/2606.04296)｜证据等级：benchmark｜定级：**B**
+- **承诺改进**：让一个 LLM 判断『此刻该不该让 agent 停下来反思』本身就不可靠——连人类标注的干预点都不一致。
+- **证据**：在 SWE-bench-Verified 的调试轨迹上评估 4 类触发器：状态阈值触发在 39–83% 的动作上持续误触发（v2 更正：观察者无法记录恢复，衰减从未运行）；zero-shot LLM-as-judge 中小模型（gpt-5.4-mini）从不触发，前沿与跨厂商模型需完整轨迹上下文才脱离零触发地板，F1 仅 0.17–0.40 且成本最高达 90 倍；3 名受训标注员对 56 步轨迹的干预位置一致度仅略高于随机（位置 Krippendorff's α=+0.047，最佳两两 Cohen's κ=+0.349），干预类型的一致性更接近零。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 3 / 可测性 4。反面证据与摘要数字全部吻合，足以否决『LLM judge 定时反思』这类组件的默认采用；但样本极小且为诊断研究，确定性信号触发方案仍需自研 A/B 兜底验证。
+- **测试设计**：三臂：对照组=固定周期反思，实验组=确定性信号触发，附加臂=LLM-judge 触发；同步记录解决率、token 与墙钟成本，验证 LLM-judge 臂是否同时更差且更贵。
+- 备注：论文是『何时干预』的诊断研究，样本是少量 SWE-bench-Verified 轨迹 + 人工标注，统计功效有限，且作者在 v2 明确更正了首个实验的衰减 bug；『触发时机』结论可迁移，『反思内容』结论不可迁移。
+
+#### S088 · 自我纠错盲区：错误归因从『我自己』改成『外部指出的』即可纠错
+
+- **大类/来源**：反思与自修正｜[Self-Correction Bench: Uncovering and Addressing the Self-Correction Blind Spot in Large Language Models](https://arxiv.org/abs/2507.02778)｜证据等级：benchmark｜定级：**B**
+- **承诺改进**：模型能纠正『别人指出的错』，却纠正不了『自己刚犯的错』；同样的上下文，只改错误归属就能让纠错率大幅上升。
+- **证据**：受控评测框架：把同一个错误分别注入为外部（用户归因）或内部（模型归因），其余上下文完全相同。14 个开源非推理模型平均呈现 64.5% 的自我纠错盲区；归因于后训练数据中缺少纠错序列：仅用 5,306 条纠错轨迹微调就把盲区降低 76.0%。机制上存在可迁移的『对话角色方向』，在输出前追加 “Wait” 无需训练即可把盲区降低 89.3%。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 3 / 可测性 5。受控注入设计+同行评审（COLM 2026），数字与摘要全中；但证据域非 coding 且为非推理模型，对仓库级编码属措辞级假设，落地价值需自测故定 B。
+- **测试设计**：随机把错误提示的归属在『自省』与『外部工具报告』之间切换做 A/B，再叠加『Wait』前缀作为第三个因子，在 coding 任务上测纠错率与总 token。
+- 备注：结论来自数学/指令类基准与开源非推理模型；『追加 Wait 即降盲区 89.3%』是干预性发现，在 coding 任务上需复测，且要排除它只是把输出分布推回训练分布这一解释。
+
+#### S089 · 别让 LLM 反复『自证有 bug』：修复必须由可复现执行证据触发
+
+- **大类/来源**：反思与自修正｜[If It's Not Buggy, Don't Fix It: On the Dynamics of Iterative Bug-fixing with LLMs (arXiv 2609.10123)](https://arxiv.org/abs/2609.10123)｜证据等级：ablation→**benchmark**（K3 修正）｜定级：**A**
+- **承诺改进**：在多个模型与多种修复环境上，LLM 持续声称在完全没有 bug 的程序里发现了 bug；而『修好有 bug 程序』的比例低于『破坏正确程序』的比例；该循环长期演化会进入『伪修 bug 循环』——同一改动被反复加上又撤掉。机制上探针发现存在控制『编辑倾向』的 steering vector。
+- **证据**：摘要原文（读取 abs 页确认）：跨多模型与多修复环境，LLM 持续在完全无 bug 的程序上报 bug；修复有 bug 程序的比例低于对正确程序造成的破坏比例；五轮式循环出现同一改动反复增删的 pseudo-bug-fixing cycle；mechanistic probing 找到控制编辑倾向的 steering vector。摘要未给出具体百分比。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 4 / 可测性 4。负面诊断与摘要逐句吻合，直击无人产线最危险的 reviewer-fixer 死循环；处方（修复必须由可复现 failing test 触发）清晰且 A/B 易做，预印本且缺量化幅度故证据强度 3。
+- **测试设计**：对照组：reviewer 一报 bug 就让 fixer 改；实验组：只有存在可复现 failing test（或官方 FAIL_TO_PASS 断言失败）才允许 fixer 改；比『无 bug 程序被改坏』的比例、单位时间有效修复数与收敛轮数。
+- 备注：属于负面/诊断性研究，摘要未给量化百分比（正文数字未逐条抽取），落地时需先在自己的任务上复现『伪修循环』再验证处方。结论与 TestJack（34.4% 被判正确实则违规）方向一致：模型自评的置信度与证据强度脱钩。；修正建议：evidenceGrade 建议由 ablation 改为 benchmark（受控观察性研究+机制探针，无消融臂）。
+
+#### S090 · think 工具与 interleaved thinking：把反思内联进工具循环（边干边审）
+
+- **大类/来源**：反思与自修正｜[Anthropic Engineering: The 'think' tool（interleaved thinking 特性的工程化形态）](https://www.anthropic.com/engineering/claude-think-tool)｜证据等级：ablation｜定级：**B**
+- **承诺改进**：给模型一个不取数据、只落盘思考的暂停工具，在长工具链中先自检再行动：τ-bench airline pass^1 0.570 vs 基线 0.370（相对 +54%），retail 0.812 vs 0.783；SWE-bench 含 think 工具平均 +1.6%，并贡献 Claude 3.7 Sonnet SWE-bench 0.623 的当时 SOTA。
+- **证据**：官方工程博客（本次核验引句）：airline '0.570 ... compared to just 0.370 for the baseline—a 54% relative improvement'；retail 0.812 vs 0.783；SWE-bench '(n=30 samples with think tool, n=144 samples without) ... improved performance by 1.6% on average'；页面 2025-12-15 更新注明多数情况下建议改用 extended thinking。官方 extended thinking 文档本次因区域限制未能核验分项数字。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 3 / 可测性 5。官方博客数字逐字吻合且含对照，但 SWE-bench 收益仅 +1.6%、官方自己已转向 extended thinking，对 coding 产线是低优先级的可选项（测试极便宜故可顺手 A/B）。
+- **测试设计**：对照：同模型无 think 工具；实验：在每次写操作与测试失败后强制调用 think 记录检查清单；另设 extended thinking 臂三方案对比；比 resolved 率、工具调用数、无效重试数。
+- 备注：airline 相对提升大但域窄；SWE-bench 仅 +1.6% 且两臂样本不等（30 vs 144）；官方已转向 extended thinking，A/B 应同时测两形态；think 内容占上下文需限额。
+
+### 3.6 规划与分解（4 条，A 级 3 条）
+
+#### S011 · Agentless：无自主规划三阶段流水线 + 批量采样与测试选优（低成本强基线）
+
+- **大类/来源**：规划与分解｜[Agentless: Demystifying LLM-based Software Engineering Agents（Xia et al.，arXiv:2407.01489；正式发表于 FSE 2025 / PACMSE，DOI 10.1145/3715754）〔来源勘误（本报告核查 arXiv 与 ACM DL）：主清单标注的「ISSTA 2024」「ICSE 2025」均不准确——FSE 与 ISSTA 2025 共用 PACMSE 论文集，应为混淆来源〕](https://arxiv.org/abs/2407.01489)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：用 LLM 做三阶段（定位 → 修复 → 补丁验证），不让 LLM 自主决定后续动作、不使用复杂工具，仍能拿到当时开源软件 agent 的最好成绩 ｜ 〔并集·Agentless(B分片)〕不用自由 agent 循环，用固定三阶段（层次化定位→修复采样→跑代码验证 patch）在 SWE-bench Lite 解决 32.00%（96 例），成本仅 $0.70/issue（早期版本报告 27.33%、$0.34/issue，为当时开源最高）；关键在验证阶段由执行结果而非 LLM 自评决定取舍 ｜ 〔并集·Agentless 选优消融(Table 4)〕不用 LLM 自主决定下一步、不用复杂工具的三阶段（层次定位→修复→验证）流程，在 SWE-bench Lite 上以 32.00%（96 个正确修复）、平均 $0.70 取得当时开源 agent 最高分；修复阶段采样至多 40 个补丁（4 组定位 × 每组 10 补丁），选优消融：多数投票 77 (25.67%) $0.00 → +回归测试过滤 81 (27.00%) $0.01 → +生成复现测试过滤 96 (32.00%) $0.25。 ｜ 〔并集·Agentless(D分片,v1.5)〕分层定位（文件级→元素级）→补丁采样→测试验证/重排，不设自主决策循环：SWE-bench Lite 32.00%（96 个修复）成本仅 $0.70/实例（论文版），发布时为开源方案中最高成绩且最低成本；README：v1.0（2024-07）27.3%、$0.34/issue，v1.5+Claude 3.5 Sonnet（2024-12）40.7% Lite / 50.8% Verified。
+- **证据**：SWE-bench Lite（300 题）：32.00%（96 题正确），成本 $0.70/题，论文称高于当时所有开源软件 agent；作者人工分类 SWE-bench Lite 后剔除 20 题有精确 ground-truth patch 的实例与 10 题描述不足/误导的实例，另建 SWE-bench Lite-S 做更严格对比 ｜ 〔并集·Agentless(B分片)〕论文摘要（已核对原文最新版）："32.00% (96 correct fixes) on SWE-bench Lite at a cost of $0.70 per issue"；三阶段 "localization, repair, and patch validation"，patch validation 靠实际运行代码检验而非让 LLM 决定后续动作。早期 27.33%/$0.34 数字来自 v1 及作者发布说明（HuggingFace/作者社媒转述） ｜ 〔并集·Agentless 选优消融(Table 4)〕arXiv 摘要与正文 Table 4（下载 PDF 抽取核对）：32.00%、$0.70、Table 4 各档数字如上；同文给上界——不做挑选、把所有候选 patch 都算上可解 126 条 (42.0%)，说明选择环节仍有大量空间；作者另手工标注并剔除 ground-truth 泄漏与描述不足的问题，构造 SWE-bench Lite-S 做更严格对比。Claude 4 官方博客将其点名为 rejection sampling 先例。 ｜ 〔并集·Agentless(D分片,v1.5)〕论文摘要：32.00% on SWE-bench Lite (96 correctly repaired), $0.70 average cost，自称当时性能最高且成本最低的开源方案；README 原文：82 fixes (27.3%) and costing on average $0.34 per issue、40.7% and 50.8% solve rate on SWE-bench lite and verified。定位阶段按层级收敛（正文：先文件级再代码元素级）；作者同时构造 SWE-bench Lite-S（剔除有 ground truth 泄漏或误导性 issue 的题目）。同斯文 2024-06 的多角色 CodeR（28.33%）、SWE-agent 单体（约 18%）对比，简单流水线更便宜且更强。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 5。2024 年强基线，数字与摘要逐字吻合；作为『固定管线 vs 自主循环』对照臂几乎零成本接入 A/B。
+- **测试设计**：对照组 = 现 harness 的自主工具循环 agent（可自由 grep/glob/read）；实验组 = 固定三阶段脚本化流程（同一生成模型、同一任务集）；比解决率、交互轮次、总 token
+- 备注：SWE-bench Lite 规模偏小且作者自承数据缺陷（自己剔除 30 题），在超大仓库上的收益未验证。定位环节主要靠 BM25/TF-IDF 排序，属弱检索，大仓召回可能不足——正好可与本分片其它检索类策略做叠加 A/B ｜ 〔并集·Agentless(B分片)〕该结果发布时（2024-07）曾超过当时 agent 方法，但强模型时代自由循环已大幅领先，结论应读作『管线结构与执行验证的性价比』而非『不需要循环』；成本数字随模型价格漂移 ｜ 〔并集·Agentless 选优消融(Table 4)〕复现测试的失败模式很强：必须确认它能在原始（未修复）代码上复现出 issue，否则是废测试（Otter 论文同法）；SWE-bench Lite 本身有已知泄漏污染（见 SWE-Bench+ 条目），绝对数字需打折读；40 样本细节来自论文正文（摘要页未列）；其价值在成本效益而非绝对上限，随模型升级增益会被 agent 化方法反超。 ｜ 〔并集·Agentless(D分片,v1.5)〕32.00% 为 2024-07 分数，SWE-bench Lite 上后来者已大幅超过，可迁移的是分层定位与确定性切分思想；Lite-S 的数据清洗思路值得自研评测时借鉴。
+
+#### S040 · 四阶段工作流：探索→规划→实现→提交（plan mode 只读）
+
+- **大类/来源**：规划与分解｜[Claude Code 官方文档《Best practices》+《Subagents》；Claude Code 官方最佳实践文档（Anthropic）](https://code.claude.com/docs/en/best-practices)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：官方推荐的默认工作流是四阶段：① Shift+Tab 进 plan mode 或 claude --permission-mode plan，只读探索不动代码；② 让 Claude 出详细实现计划，可用 Ctrl+G 在编辑器里直接改计划再放行；③ 切出 plan mode 实现，并对照计划自检；④ 让 Claude 提交并开 PR。官方同时给了明确的反向条件：小改动跳过计划。plan mode 期间若需理解代码库，Claude 会委派给 Plan 子 agent，让探索输出留在独立上下文里，主会话保持只读 ｜ 〔并集·Claude Code 四段式(C分片)〕官方推荐把研究与规划同实现分离（'Separate research and planning from implementation to avoid solving the wrong problem'），流程为 1) Explore（只读探索）2) Plan（生成详细实现计划）3) Implement（对照计划写码并跑测试）4) Commit。
+- **证据**：官方 best-practice 指南，无基准数字，属官方经验。docs/best-practices.txt:20-31 给出四阶段原文与「Plan mode is useful, but also adds overhead… If you could describe the diff in one sentence, skip the plan」；docs/sub-agents.txt:25 说明 plan mode 下的委派路径（delegates research to the Plan subagent so that exploration output stays in a separate context window while the main conversation remains read-only）；docs/how-claude-code-works.txt 的权限模式表说明 Plan 模式为「Claude explores and proposes a plan without editing your source files」 ｜ 〔并集·Claude Code 四段式(C分片)〕官方文档原文（本次抓取 best-practices.md 正文第 56-107 行）：'Letting Claude jump straight to coding can produce code that solves the wrong problem.' 属官方经验性指引，无对照实验与数字。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 4 / 可测性 4。线上文档核实：Explore/Plan/Implement/Commit 四阶段、Shift+Tab 进 plan mode、Ctrl+G 改计划、'If you could describe the diff in one sentence, skip the plan'、'Plan mode is useful, but also adds overhead'、plan mode 委派 Plan 子 agent 保持主会话只读，全部逐字吻合；三臂门控设计可直接落地，定 B。
+- **测试设计**：三臂：直接实现 / 强制四阶段 / 按 diff 大小门控的四阶段（小任务跳过）。在同一批 issue 上比 pass rate、平均工具轮数、以及「计划里提到但实现漏掉」的失配率；最后用同一批任务做成本-收益前沿
+- 备注：官方自述 plan mode「adds overhead」，无净收益数字，必须在自己的任务集上实测门控阈值。落地风险在于计划被批准后实现阶段并不强制对照计划——官方只说「let Claude code, verifying against its plan」，这依赖模型自觉，与验证闸门条目的独立复核配合才可靠 ｜ 〔并集·Claude Code 四段式(C分片)〕纯官方经验，无公开 benchmark 数字；实现成本低（只是 prompt/状态机约束），但会拉长单任务时延，需与吞吐目标一起权衡。全自动产线里对应『计划落盘为文件并被下游 worker 引用』的设计。
+
+#### S109 · 显式计划 + 周期性计划提醒（plan reminder）抑制计划违背
+
+- **大类/来源**：规划与分解｜[论文《From Plan to Action: How Well Do Agents Follow the Plan?》](https://arxiv.org/abs/2604.12147)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：首个针对编程 agent 计划遵从度的系统性分析：给标准计划能提升 issue 解决率；周期性计划提醒可减少计划违背并提高成功率；但『次优计划比完全没有计划更糟』，且在早期阶段插入额外的任务相关阶段反而会降低性能（尤其当与模型内部问题解决策略不一致时）。
+- **证据**：消融级证据：分析 SWE-agent 在 SWE-bench Verified 与 SWE-bench Pro 上跨 4 个 LLM 的 21,120 条轨迹，覆盖 8 种计划变体。摘要结论：'Providing the standard plan improves issue resolution, and we observe that periodic plan reminders can mitigate plan violations and improve task success. A subpar plan hurts performance even more than no plan at all. Surprisingly, inserting additional task-relevant phases in the early stage can degrade performance.'
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 4。两万条轨迹规模的计划消融，结论方向明确且可直接转成提醒频率 N 的网格实验。
+- **测试设计**：对照组：无计划；实验组三档——标准计划 / 标准计划+每 N 步提醒（N 取 5/10/20）/ 加了额外早期阶段的计划；指标为 SWE-bench 类任务解决率与计划违背率（可按轨迹自动判定）。
+- 备注：该文对『多加规划阶段』是负面证据（过度规划有反效果）；也提示应把计划遵循能力训进模型，而不是把任务专用流程硬编进模型。
+
+#### S110 · STAIR：历史修复轨迹的多层抽象计划复用
+
+- **大类/来源**：规划与分解｜[论文《Reusing Past Repairs Through Hierarchical Trajectory Abstraction for Coding Agents》（STAIR）；STAIR: Reusing Past Repairs Through Hierarchical Trajectory Abstraction for Coding Agents（arXiv 2607.29658，2026-07-31）](https://arxiv.org/abs/2607.29658)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：将历史修复轨迹转成多层次树（从细粒度诊断动作到高层修复策略），新 issue 到来时跨抽象层挑选相关节点、裁剪成可执行计划并注入 prompt；计划还可跨 agent 迁移。 ｜ 〔并集·STAIR(gapfill)〕把历史修复轨迹转成多层（细粒度诊断动作 → 高层修复策略）可复用计划树并注入 prompt：STAIR + Lingxi 在 SWE-bench Verified 上用 MiniMax M2.5 达 81.2% Pass@1、用 GPT-5 达 79.2%；计划跨 agent 泛化——不改任何代码即可把结构完全不同的 mini-SWE-agent v2 从 75.8% 抬到 81.0%
+- **证据**：基准 + 消融：SWE-bench Verified 上，STAIR 集成进 Lingxi 后用 MiniMax M2.5 达 81.2% Pass@1、用 GPT-5 达 79.2%；不改代码即可把结构不同的 mini-SWE-agent v2 从 75.8% 提到 81.0%。消融：混合多个抽象层优于只用单一层；未经抽象的原始轨迹迁移效果明显更差。 ｜ 〔并集·STAIR(gapfill)〕本次通过 arXiv API（id_list=2607.29658）读取原文摘要核实：消融结论「混合多个抽象层级优于任一单层级」以及「原始未抽象轨迹的迁移效果明显更差」均按摘要原文转述；PASS@1 数字与基准名（SWE-bench Verified、mini-SWE-agent v2）照录。未读全文，未核实计划检索的实现细节与训练/评测划分。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 3。数字吻合且跨 agent 迁移增益罕见地被直接量化；落地成本在轨迹→层次计划抽取管线，testability 给到 3。
+- **测试设计**：对照组：无历史计划；实验组：注入单层计划 / 混合多层计划 / 未抽象的原始轨迹；同批 SWE-bench Verified 任务跑 Pass@1，并额外在一个不同结构的 agent 上验证迁移增益。
+- 备注：与 2610.08875 的结论互补：未抽象的原始轨迹迁移差，说明『计划化』本身是增益来源而非历史信息本身；实现成本主要在轨迹→层次计划的抽取管线。 ｜ 〔并集·STAIR(gapfill)〕效果高度依赖底座 agent（ Lingxi 本身是强框架），在弱 harness 上增益幅度未知；摘要未给 token 成本变化，复用长计划可能挤占预算，需在自研 harness 里一并测 token/轮次。
+
+### 3.7 测试时扩展（9 条，A 级 6 条）
+
+#### S046 · Critic 模型 + best-of-N 推理时扩展：多 rollout 采样、训练专用打分器挑最优补丁
+
+- **大类/来源**：测试时扩展｜[OpenHands 官方博客《SOTA on SWE-Bench Verified with Inference-Time Scaling and Critic Model》(2025-04-17) + harness 内置 critic 模块](https://www.openhands.dev/blog/sota-on-swe-bench-verified-with-inference-time-scaling-and-critic-model)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：不改动 agent 与 scaffold，靠采样 5 条轨迹并用微调 critic 挑选：SWE-bench Verified 从单轨迹 60.6% 提到 66.4%（'log-linear performance improvement'，当时自称 SOTA，优于用 Claude 提示词重排的方案）；并称在 LiveSWEBench、Multi-SWE-Bench（8 语言）登顶。Critic 为 Qwen2.5-Coder-32B 微调，TD 学习（γ=0.99，全部测试通过终端奖励 1 否则 0）+ 回归头，权重公开（HF: all-hands/openhands-critic-32b-exp-20250417）
+- **证据**：官方博客（2026-10 抓取）原文数字：baseline 60.6%、5 attempts 66.4%、训练细节（veRL 框架、TD 目标 r_t=γ·r_(t+1)、vLLM token-classification 服务）如上。代码取证（openhands-ai==0.39.0 wheel）：openhands/critic/finish_critic.py 内置规则版 AgentFinishedCritic（git patch 为空或无 AgentFinishAction 即 0 分），说明 critic 已是 harness 一等接口（BaseCritic/CriticResult）
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 5。官方自报但数字逐字吻合且权重公开，N 路并行 rollout+critic 选优与黑灯工厂天然契合，可直接 A/B。
+- **测试设计**：同一大仓库任务集：对照组单 rollout；实验组 N∈{3,5} rollout + 分别用（a）规则 critic、（b）开源 openhands-critic-32b、（c）LLM 提示词重排选择；比较解决率增益与每任务总成本曲线
+- 备注：5x 采样意味着 ~5x 推理成本，需按任务难度分配 N（简单任务别采样）；critic 是在 OpenHands 自产轨迹上训练的，迁移到自研 harness 分布需重训或校准；博客为官方自称成绩，swebench.com 官方榜单同期条目可交叉核对
+
+#### S091 · 重复采样扩展覆盖（repeated sampling / pass@k 覆盖曲线）
+
+- **大类/来源**：测试时扩展｜[Large Language Monkeys: Scaling Inference Compute with Repeated Sampling（Stanford，Brown et al. 2024）](https://arxiv.org/abs/2407.21787)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：解出覆盖率随采样数在 4 个数量级内持续上升，常呈 log-linear（存在推理时间 scaling law）；SWE-bench Lite 上 DeepSeek-Coder-V2-Instruct 从单样本 15.9% 升至 250 样本 56%，超过当时单样本 SOTA 43%。
+- **⚠ 勘误（K3 对照原文，已就地改正）**：证据中的基准清单含 HumanEval/MATH 系误植——论文基准为 GSM8K/MiniF2F-MATH/CodeContests/SWE-bench Lite，已就地改正。
+- **证据**：arXiv 摘要原文：'the fraction of issues solved with DeepSeek-Coder-V2-Instruct increases from 15.9% with one sample to 56% with 250 samples'，并称 outperform 'the single-sample state-of-the-art of 43%'；GSM8K/MiniF2F-MATH/CodeContests/SWE-bench Lite 均给出 pass@k 覆盖曲线〔K3 勘误：原清单中 MATH/HumanEval 有误，论文基准为 MiniF2F-MATH 与 CodeContests，HumanEval 不在列〕。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 5。经典且数字精确，是采样预算调度的理论基础，A/B 成本极低，定 A。
+- **测试设计**：同一批真实仓库任务，对照组 N=1，实验组 N∈{2,5,10,25}（不同温度/提示），画 resolve@N 覆盖曲线并拟合幂律，观察斜率与平台点。
+- 备注：摘要同时警告：majority voting 与 reward model 选优在几百样本后进入平台，验证器是瓶颈；SWE-rebench 指出排行榜成绩受 best-of-N 与重试机制影响，横向比较需统一 N。；修正建议：evidence 中基准清单改为『GSM8K/MiniF2F-MATH/CodeContests/SWE-bench Lite 均给出 pass@k 覆盖曲线』。
+
+#### S092 · 官方并行测试时计算：多路并行 + 回归测试拒绝采样 + 内部评分模型选优
+
+- **大类/来源**：测试时扩展｜[Introducing Claude 4（Anthropic 官方博客，2025-05-22）](https://www.anthropic.com/news/claude-4)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：SWE-bench Verified：Opus 4 72.5%（标准）→ 79.4%（parallel test-time compute），Sonnet 4 72.7% → 80.2%，各约 +7pp。
+- **证据**：官方博客（直读核验）：high compute 档为『并行采样多个 attempts』，先丢弃破坏可见回归测试的补丁（类似 Agentless 的 rejection sampling，不使用隐藏测试），再用内部评分模型从剩余 attempts 选优；脚手架仅 bash + 字符串替换编辑工具，报告 500 题全量成绩。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 4。厂商官方数字且机制可自建复刻，产线同构的择优管线，定 A。
+- **测试设计**：对照组单路 agent；实验组 N 路并行 + 回归测试过滤 + 评分模型选优，报告 resolve rate 提升与每任务成本/时长。
+- 备注：官方未披露并行路数与评分模型细节；这是官方 eval 档位而非开箱 API 参数，复现需自建过滤与评分器。
+
+#### S093 · 推理档位（effort / test-time compute 档）按任务难度调度
+
+- **大类/来源**：测试时扩展｜[Claude Opus 4.5 官方公告（Anthropic，2025-11）](https://www.anthropic.com/news/claude-opus-4-5)｜证据等级：ablation→**benchmark**（K3 修正）｜定级：**A**
+- **承诺改进**：medium effort 档即达到 Sonnet 4.5 在 SWE-bench Verified 的最好成绩且输出 token 少 76%；最高档超出 Sonnet 4.5 4.3 个百分点且 token 少 48%。
+- **证据**：官方页面（直读核验）：'At medium effort, Opus 4.5 matches Sonnet 4.5's best score on SWE-bench Verified' + '76% fewer output tokens'；最高档 '+4.3 percentage points' + '48% fewer tokens'；另一 deep research 评测中 effort+上下文压缩+进阶工具组合带来 70.48%→85.30%（+15pp）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 4。数字属实、成本杠杆大，档位调度易在 harness 内 A/B，定 A（证据等级建议下调为 benchmark）。
+- **测试设计**：按任务难度分层（历史成功率或静态复杂度），A/B 固定 high 档 vs 难度自适应档位，比较 resolve rate 与每任务 token/费用。
+- 备注：官方页面只给相对差值、未披露各档绝对分；档位语义由厂商定义、跨模型不可比；页内 take-home exam 结果亦使用了 parallel test-time compute。；修正建议：evidenceGrade 由 ablation 改为 benchmark（官方档位对比，非受控消融）。
+
+#### S094 · Best-of-N + 模型生成测试投票选优（test-based voting + 终审轨迹）
+
+- **大类/来源**：测试时扩展｜[CodeMonkeys: Scaling Test-Time Compute for Software Engineering（Stanford ScalingIntelligence，2025）](https://arxiv.org/abs/2501.14723)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：SWE-bench Verified 57.4%，总预算约 2300 美元；对已有顶级提交做 ensemble 选择可得 66.2%，超过 ensemble 中最好成员。
+- **证据**：arXiv 摘要（直读核验）：'resolves 57.4% of issues from SWE-bench Verified using a budget of approximately 2300 USD'；'selecting over an ensemble of existing top submissions obtains a score of 66.2%' 且 'outperforms the best member of the ensemble on its own'；每题并行多条多轮轨迹、边改边写并运行测试脚本，选优=模型生成测试投票 + 专门多轮选择轨迹。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 4。SWE-bench Verified 上的官方数字可复现，测试投票选优可直接落地产线，定 A。
+- **测试设计**：对照单轨迹；实验组 N 轨迹 + 生成测试投票选优，消融『有/无投票』『有/无终审选择轨迹』『单源/跨源候选』。
+- 备注：补丁文本几乎不会完全相同，朴素 majority voting 对代码不可行——须用测试通过数替代；成本高（≈$4.6/题），产线需按难度分配预算；开源实现见 github.com/ScalingIntelligence/codemonkeys。
+
+#### S095 · 负面结果：overthinking——加长推理边际递减甚至有害
+
+- **大类/来源**：测试时扩展｜[When More Thinking Hurts: Overthinking in LLM Test-Time Compute Scaling（2026）](https://arxiv.org/abs/2604.10739)｜证据等级：ablation｜定级：**B**
+- **承诺改进**：推理 token 增加时边际收益大幅递减；模型会『说服自己』放弃已正确的答案（overthinking）；最优思考长度随题目难度变化、均匀分配算力次优；停在中等预算即可保持精度并大幅省算力。
+- **证据**：arXiv 摘要（直读核验）：'diminish substantially at higher budgets'、'abandoning previously correct answers'、cost-aware 评估框架显示中等预算 'keep accuracy roughly comparable'；摘要页未列具体百分比与基准名。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 3 / 可测性 4。负面/边界类结论，摘要级证据且无代码领域数字，作为升档策略的约束项收录，定 B。
+- **测试设计**：在同一任务集上扫描 thinking 预算档位，记录精度-成本曲线与『正确答案被推翻』事件率，找各难度层的拐点。
+- 备注：同向佐证：Does Thinking More Always Help? Mirage of Test-Time Scaling（OpenReview tKPqbamNb9）用熵角度解释长推理劣化；本轮未读正文，量化结论待核。
+
+#### S096 · 负面结果：真实环境中并行/顺序两条扩展轴都难以持续涨分（verification gap）
+
+- **大类/来源**：测试时扩展｜[Evaluating Test-Time Scaling of General LLM Agents（CMU，2026）〔K3 勘误：原条目标题《Benchmark Test-Time Scaling…（General-AgentBench）》与 arXiv:2602.18998 实际标题不符〕](https://arxiv.org/abs/2602.18998)｜证据等级：ablation｜定级：**B**
+- **承诺改进**：10 个主流 LLM agent 上：'neither scaling axis can consistently yield meaningful gains from additional test-time compute'；顺序扩展受 scaling plateau 限制，并行扩展被 verification gap 拖垮。
+- **⚠ 勘误（K3 对照原文，已就地改正）**：来源标题有误：实际标题为《Evaluating Test-Time Scaling of General LLM Agents》，「General-AgentBench」命名未经证实，条目头已就地改正。
+- **证据**：arXiv 摘要（直读核验）：原句 'a scaling plateau that bottlenecks sequential scaling and the verification gap that undermines parallel scaling'；统一基准覆盖搜索/编码/推理/工具使用，10 个 agent 粒度递增地扫描测试时算力；摘要页无绝对数字。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 4 / 可测性 3。重要边界警示：无验证器时并行采样可能只烧钱；标题引用有误需修正，定 B。
+- **测试设计**：在自研产线复刻两轴扫描，按『有无执行测试反馈』分层统计并行增益，验证 verification gap 假说。
+- 备注：与 coding 单领域证据（LLM Monkeys/CodeMonkeys/S*）并不矛盾：分歧点在验证器质量——有可执行测试时并行扩展有效，恰说明 harness 应优先投验证器。；修正建议：source 标题改为《Evaluating Test-Time Scaling of General LLM Agents》(2026)，去掉未证实的『General-AgentBench』命名。
+
+#### S097 · compute 对齐下：顺序精修优于并行自洽（更高算力效率的反思形态）
+
+- **大类/来源**：测试时扩展｜[The Sequential Edge: Inverse-Entropy Voting Beats Parallel Self-Consistency at Matched Compute](https://arxiv.org/abs/2511.02309)｜证据等级：benchmark｜定级：**B**
+- **承诺改进**：在同等 token 预算与算力下，让链『在前一次尝试上继续改』（顺序精修）一致优于并行的 self-consistency。
+- **证据**：5 个前沿开源模型 × 3 个困难推理基准：顺序扩展在 95.6% 的配置中持续优于并行的 self-consistency，准确率增益最高 46.7%；再叠加训练无关的『逆熵加权投票』（按推理链熵的倒数加权答案）进一步超过并行多数票。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 3 / 可测性 4。数字属实但域外证据（推理基准），迁移到代码任务需自家复测，定 B。
+- **测试设计**：固定总 token 预算，对照组=并行 best-of-N / 自洽，实验组=顺序精修（同一模型、上一轮输出进入上下文）；两臂用同一 verifier 选最终答案以隔离选择效应。
+- 备注：结论来自推理基准而非代码/仓库任务；且与 2607.26117（盲重采样优于自修复）方向相反——差异很可能来自模型规模（7B 以下 vs 前沿开源）与任务难度，需在自家 harness 上同时复测两条曲线再定策略。0 引用的新论文。
+
+#### S098 · 并行多尝试 + LLM chooser 选优（oracle pass@k 与裁判选优两层）
+
+- **大类/来源**：测试时扩展｜[SWE-agent（chooser 配置与 pass@k 曲线）](https://github.com/SWE-agent/SWE-agent)｜证据等级：ablation→**benchmark**（K3 修正）｜定级：**A**
+- **承诺改进**：同一任务实例可并行产出多个补丁候选（max_attempts 10），再由一个强推理模型做 chooser 挑选；官方测得 pass@k 曲线：pass@1 17.94% → pass@6 32.67%，说明并行采样换覆盖率的收益是实在的。
+- **证据**：配置证据 config/benchmarks/250212_sweagent_heavy_sbl.yaml:135-188：retry_loop: type: chooser，cost_limit 6.0、max_attempts 10、min_budget_for_new_attempt 1.0；chooser instance_template 要求 Pick the most reasonable patch ... consistent with the rest of the codebase，无法决定时选第一个，必须输出单个下标；submission_template 额外给裁判 edited_files30（30 行上下文），max_len_submission 截断到 5000；裁判模型 o1、temperature 1.0、reasoning_effort high、per_instance_cost_limit 30。官方 pass@k：论文 §B.5 Table 10（SWE-bench Lite，GPT-4 Turbo，6 次独立运行）单次 %Resolved 17.33/18.00/18.00/18.67/17.33/18.33，均值 17.94；pass@2 23.89、pass@3 27.35、pass@4 29.67、pass@5 31.35、pass@6 32.67。执行层并行由 SWE-ReX 支撑（README：Running 100 agents in parallel? No problem either!）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 4。配置与成本数字全核实，pass@k 数值算术自洽且来源确含该表，并行采样+chooser 是产线直接可用的放大器，定 A。
+- **测试设计**：同一实例固定 n 个并行 worker（n=4 与 n=8 两档），一组用首个 submit 的补丁不做选择，一组用 chooser 选优；报告 oracle pass@n（上限）、chooser 实测 pass@n、以及随机挑选基线（否则无法判断 chooser 是否真有用）。
+- 备注：pass@k 与 chooser 是两件事：论文的 pass@6 32.67% 是 oracle 上限（任一候选通过即算通过），没有证据表明 chooser 能逼近该上限；chooser 配置本身没有任何官方成绩数字（evidenceGrade 只在 pass@k 这一支成立）。论文 §5.2 反向线索：成功轨迹中位 $1.21/12 步，失败轨迹均值 $2.52/21 步，93.0% 的已解决实例在耗尽预算前提交——把预算从单条长轨迹挪到多条短轨迹很可能划算，但论文未直接验证。裁判模型（o1、单次 $30 上限）成本很高，pass@6 收益需扣掉裁判成本重算。；修正建议：evidenceGrade 改为 benchmark；link 建议加挂论文链接 https://arxiv.org/abs/2405.15793 作为 pass@k 数字的直接出处。
+
+### 3.8 验证与测试（15 条，A 级 12 条）
+
+#### S029 · fresh-context 终审：把评审放到完全干净的会话里做，而不是同一会话内自我复审
+
+- **大类/来源**：验证与测试｜[Cross-Context Review: Improving LLM Output Quality by Separating Production and Review Sessions (arXiv 2603.12123)](https://arxiv.org/abs/2603.12123)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：在同一会话内让模型复审自己的产出抓不到错误；把评审放进无生产历史的新会话（fresh session）才有增益：CCR F1 28.6% vs 同会话二次复审 21.7%
+- **证据**：受控实验：30 个产物（代码、技术文档、演示脚本）、150 个注入错误，四个条件——同会话自审 SR、重复自审 SR2、带上下文 subagent 评审 SA、跨上下文评审 CCR。'CCR (F1 28.6%) outperforms a second review in the same session (SR2, 21.7%) robustly, both in the first run (paired t, p<0.001) and in the three-run average (Holm-adjusted p=0.004)'
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 4 / 可测性 5。fresh-context 终审方向有受控支持但效应在 v2 收窄，属『值得自测的弱阳性』；A/B 成本极低（多开一个干净会话）。
+- **测试设计**：对照组=主 agent 同会话内自审；实验组=开一个只喂最终 diff/产物、不喂生产历史的干净会话做终审；在注入缺陷的仓库补丁集上比较缺陷检出率/F1，并统计额外 token 与轮次成本
+- 备注：重要负面结果（v2 版本已修订结论）：三轮平均后 CCR 相对'带上下文的 subagent 评审 SA(23.8%, p=0.057)'和'单次同会话自审 SR(27.1%, p=0.26)'并不显著领先，第一版的优势主要来自 run 1。样本小（30 产物/150 错误）、非代码专属、注入错误分布不代表真实缺陷分布。与 Claude Code 官方的 fresh-context 对抗式复核实践（见验证闸门条目）方向一致但证据强度不同
+
+#### S041 · Git worktree 并行写入隔离 + 强制编辑检查
+
+- **大类/来源**：验证与测试｜[Claude Code 官方文档《Best practices》；Claude Code 官方文档《Run parallel sessions with worktrees》](https://code.claude.com/docs/en/best-practices)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：官方把「给 Claude 一个能跑的检查」当成核心机制，并给出四级递进的闸门强度：① 同一条 prompt 里要求跑检查并迭代；② 跨会话的 /goal 条件，由独立评估器每轮复查，未解决就一直干；③ 确定性闸门——用 Stop hook 把检查脚本化，不通过就不许结束这一轮；④ 独立第二意见——用验证子 agent 或动态 workflow 在新上下文里反过来尝试推翻结果，「做活的 agent 不给自己打分」。另配一条对抗式复核建议：任务判完成前，让一个 fresh-context 子 agent 只看 diff 和判据报缺口 ｜ 〔并集·Claude Code worktrees 强制检查〕每个会话/子agent在独立 worktree（独立目录+分支）工作、互不覆盖；用四类检查强制隔离：阻止指向主 checkout 的 Edit/Write/NotebookEdit、阻止在主 checkout 运行命令、拦截 git 重定向（git -C/GIT_DIR）、拦截无法验证停留在 worktree 内的命令；文档明确不提供自动合并，合并交给 git。
+- **⚠ 勘误（K3 对照原文，以下口径为准）**：「文档明确不提供自动合并，合并交给 git」在线上文档无明文；四级闸门阶梯与 worktree 强制隔离机制核实无误。
+- **证据**：官方经验，无数字。docs/best-practices.txt:8-19 逐条给出四级阶梯与原文「the agent doing the work isn't the one grading it」；docs/best-practices.txt:223-229 给出对抗式复核原文「A reviewer running in a fresh subagent context sees only the diff and the criteria you give it, not the reasoning that produced the change」；docs/best-practices.txt:12 给出「Before/After」对照表（提供验证标准 / 视觉验证 / 针对根因而非症状） ｜ 〔并集·Claude Code worktrees 强制检查〕官方机制性文档（无基准数字）：worktree 建于 .claude/worktrees/<name>、分支名 worktree-<name>，默认从默认分支新起（worktree.baseRef:"fresh"，可设 head）；.worktreeinclude 自动拷贝 gitignored 环境文件；已知缺口：普通 shell 写入（如 cp 进主 checkout）不受编辑检查拦截；LFS、hook 路径（CLAUDE_PROJECT_DIR 不跟随）与信任目录均有明确限制。同类实践交叉印证：Cursor 2.0 官方博客称并行 agent powered by git worktrees or remote machines，Composer 模型比同智能水平模型快 4x、多数回合 <30s（https://cursor.com/blog/2-0）；Conductor 为每任务建独立 worktree+分支+终端+diff+review（https://www.conductor.build/docs）。
+- **K3 验证结论**：链接有效；claim 部分一致；证据强度 2 / 大型仓库价值 5 / 可测性 4。验收四级阶梯与 worktree 强制隔离逐项核实吻合（含 reviewer 误报警告），是无人值守产线的前提机制；证据为官方文档无数字（定级如实），唯'明确不提供自动合并'一句在线上文档无据需修正，定 B。
+- **测试设计**：在同一批任务上做五臂阶梯实验（无检查 / prompt 内迭代 / Stop hook 硬闸 / fresh-context 复核 / hook+复核），主指标 pass rate，次指标闸门触发后的修复率、误杀率与额外 token
+- 备注：官方给了明确的反面证据，值得照抄进 prompt 模板：docs/best-practices.txt:229「A reviewer prompted to find gaps will usually report some, even when the work is sound… Chasing every finding leads to over-engineering」，因此官方要求复核者「只报影响正确性或既定需求的缺口，其余标为 optional」。实测时必须同时统计 reviewer 的误报率，否则复核子 agent 会把产线推向防御性冗余代码。对照的受控证据见 Cross-Context Review（arXiv 2603.12123）条目——其 v2 结论显示 fresh-context 复核对带上下文 subagent 评审的优势不稳健 ｜ 〔并集·Claude Code worktrees 强制检查〕worktree 只隔离代码不隔离运行环境，重依赖仓库需配套 env 复制；shell 写入绕过检查是已知缺口。；核验问题：["'文档明确不提供自动合并，合并交给 git' 一句在线上 worktrees 文档找不到明文（页面未陈述任何合并策略），属过度表述；其余全部核实吻合：四级闸门阶梯与 'the agent doing the work isn't the one grading it'、fresh-context 复核两处引文、.claude/worktrees/<name>+worktree-<name> 分支、baseRef fresh/head、.worktreeinclude 只拷贝 gitignored 匹配文件、四类强制检查、cp/shell 重定向可绕过、LFS 指针文件、CLAUDE_PROJECT_DIR 不跟随、信任目录要求"]；修正建议：把 '文档明确不提供自动合并，合并交给 git' 改为 'harness 不做自动合并，合并在 worktree 之外由 git 流程完成（线上文档未明示合并策略，按机制推断）' 或直接删除该分句。
+
+#### S068 · lint 引导的编辑要单独做「功能保持」评测，不能只看 lint 告警减少量
+
+- **大类/来源**：验证与测试｜[LintEval（arXiv 2610.20027, EMNLP 2026 Findings）](https://arxiv.org/abs/2610.20027)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：在 lint 引导的代码重构上存在稳定权衡：闭源商业模型 lint Reduction@P 最高达 90.4%，但功能保持的 Pass@1 只有 67.1–68.3%；开源小模型甚至出现低或负的 Reduction@P；监督格式会直接决定上限（SFT 后 Qwen2.5-Coder-7B 的 Reduction@P 从 24.7% 升到 76.0%）
+- **证据**：LintEval 摘要：多语言（C++/Python/Java）基准，含 13,061 个功能正确程序与 171,662 条 lint 告警，同时评功能保持、告警减少、避免新增告警与编辑最小性；「a persistent trade-off: closed-source commercial models reach up to 90.4% Reduction@P but achieve only 67.1%-68.3% Pass@1, while several open-source small models show low or negative Reduction@P」；「refactoring-oriented SFT raises Qwen2.5-Coder-7B Reduction@P from 24.7% to 76.0%」。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 4。同行评审基准直接证明「lint 减少≠功能保持」，为 lint 门禁划定只拦致命错误的边界，定级 A。
+- **测试设计**：编辑管线两臂：仅按测试/语义校验落盘 vs 额外引入 lint 门（只拦致命项）；主指标 resolved rate 与「无关文件改动行数」占比，辅指标 lint Reduction@P；并在同一批带大量历史 lint 的真实仓库上跑以放大该权衡。
+- 备注：这是本主题里最硬的负面证据：它直接反驳「把 lint 反馈接进编辑闭环就会更好」的天真假设——lint 减少与功能保持之间存在权衡，且「负 Reduction@P」说明模型可能越改越糟。务必只对「本次编辑新引入的致命错误」用 lint 门（见第 2 条的实现细节），不要把全量 lint 告警作为优化目标。
+
+#### S072 · 混合验证器：执行型 + 无执行型互补（R2E-Gym）
+
+- **大类/来源**：验证与测试｜[R2E-Gym: Procedural Environments and Hybrid Verifiers for Scaling Open-Weights SWE Agents (COLM 2025)；R2E-Gym: Procedural Environments and Hybrid Verifiers for Scaling Open-Weights SWE Agents（arXiv 2504.07164）](https://arxiv.org/abs/2504.07164)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：用程序化生成的可执行环境（8.7K 任务）做训练与测试时扩展：单一验证器（执行式或打分模型）各自饱和在 42-43%，混合后把 SWE-bench Verified 推到 51%（约 26 rollouts/实例，开源模型当时 SOTA）；32B 模型经环境内训练 pass@1 34.4% ｜ 〔并集·R2E-Gym(C分片)〕在真实仓库 issue 基准上，纯执行型与纯语言型 verifier 单独使用都会饱和在 42–43%（test-based 区分度低，execution-free 有偏且常依赖表层风格特征），组合后可把 pass@1 推到 51%。
+- **证据**：论文摘要（已核对原文）："our approach achieves 51% on the SWE-Bench Verified benchmark"；"each approach individually saturates around 42-43%"，execution-based 与 execution-free 验证器互补带来显著增益；环境规模 "more than 8.7K tasks" ｜ 〔并集·R2E-Gym(C分片)〕论文摘要与官方 README 一致：SFT 训练配方（SWE-GEN/SYNGEN，AgentGym 8.7K+ 任务，用测试生成 + commit 回译合成可执行环境）使 32B 模型在 SWE-bench Verified 上 pass@1 34.4%；Hybrid Test-time Scaling 组合两类 verifier 后 51% pass@1（当时 open-weight SWE-agent SOTA，宣称与 o1 / o1-preview / sonnet-3.5-v2（带工具）具竞争力）。项目页 https://r2e-gym.github.io/。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 3。执行+打分混合验证器的 42→51% 增量证据扎实，正是并行产线「N 路 rollout+选择器」的核心机制，定级 A。
+- **测试设计**：同一任务并行生成 N 个候选 patch，三组选择器：随机/单候选（对照）、执行验证（跑回归测试）、执行+打分模型混合；比较最终 resolve rate、验证器误杀率与容器时开销
+- 备注：51% 依赖自训模型与大规模 rollouts（约 26 次/实例），算力成本高；执行验证依赖高质量测试环境——环境缺失时需先做 R2E 式环境合成 ｜ 〔并集·R2E-Gym(C分片)〕数字来自 open-weight 32B 模型的 SFT + 推理时扩展（2025 年初模型档），不能直接外推到前沿闭源模型，绝对数需重测；execution-free verifier『有偏、依赖风格』是其在自家流水线上观察到的性质，换模型/换任务需重测。相关：CodeRM（arXiv 2501.01054）发现单测数量与 reward 信号质量正相关，动态扩展单测数后 HumanEval Plus 上 Llama3-8B 提升 18.43%、GPT-4o-mini 提升 3.42%。代码 https://github.com/R2E-Gym/R2E-Gym（README 200 已验证，51% 与 34.4% 与论文摘要一致）。
+
+#### S099 · CodeT 双执行一致性：自生成测试对并行候选做双重投票选优
+
+- **大类/来源**：验证与测试｜[CodeT: Code Generation with Generated Tests（ICLR 2023, Microsoft）](https://arxiv.org/abs/2207.10397)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：同一 LM 并行生成候选程序与测试用例，按双执行一致性（代码过测试+测试过代码，输出与生成测试的一致性 + 输出与其他代码样例的互相一致性）排序选优；HumanEval pass@1 65.8%，较 code-davinci-002 绝对提升 18.8 个点，较此前 SOTA 提升 20%+；在 4 个基准、5 个模型上一致提升。
+- **证据**：arXiv 摘要原文（curl 读取 abs 页确认）：'CodeT improves the pass@1 metric on HumanEval to 65.8% ... an absolute improvement of 18.8% over the code-davinci-002 model'；基准覆盖 HumanEval / MBPP / APPS / CodeContests，模型从 Codex 到 code-davinci-002 五个规格。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 4。同行评审经典、主数字精确，双执行一致性是验证器最小范式；一个次级数字未核实，不影响定 A。
+- **测试设计**：对照组：只用 majority voting 或 LLM-as-judge 选 patch；实验组：启用生成测试 + dual execution agreement 选 patch；在同一批真实仓库 issue 上比 resolved rate、token 成本与『被选中 patch 的真实正确率』（gold patch/人工复核抽样校准）。
+- 备注：CodeT 的验证信号全部来自 LLM 自生成测试，测试本身会错，形成假阳性筛选；后续工作（arXiv 2410.06992）实测 SWE-bench 上 31.08% 的通过补丁因测试太弱而可疑；大仓库写有意义的隔离测试成本高；候选×测试交叉执行有组合成本 k×m；CodeT 是竞赛编程设定，没有仓库级导航与跨文件依赖，不能直接搬到大型真实仓库。；修正建议：删除或弱化『较此前 SOTA 提升 20%+』，或补充该数字的具体出处（论文正文表格）。
+
+#### S100 · AlphaCode 式『大采样 → 用测试过滤 → 按行为聚类』：把测试当过滤器而不是唯一判据
+
+- **大类/来源**：验证与测试｜[Competition-Level Code Generation with AlphaCode（DeepMind, Science 2022）](https://arxiv.org/abs/2203.07814)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：面对海量模型采样，先用题目自带样例测试过滤掉不合格样本，再用生成的测试输入对剩余样本做行为聚类，从每个 cluster 里取一个提交，把有限提交预算用在行为多样的候选上。
+- **证据**：原文（下载 arXiv PDF 用 pdftotext 抽取正文核对）：用样例测试过滤可移除超过 99% 的模型采样；生成测试 + 过滤把 CodeContests 上的 false positive 率从 62% 降到 4%；过滤 100 万样本后每题仍剩数千候选，必须靠聚类处理；作者明说『过滤+聚类』与『完美选择』上界之间仍存在很大差距；在约 10% 的题目上模型连一个能通过样例测试的程序都找不到。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 3。机制层面与原文一致，是『海量候选×有限评审预算』的经典解法，定 A（正文数字本轮未重验）。
+- **测试设计**：对照组：按随机/先到先得挑候选提交；实验组：测试过滤 + 行为聚类后每 cluster 挑一个；在同一评审资源预算下比最终通过率与重复 patch 比例。
+- 备注：AlphaCode 的测试输入是『合成的、可能无效的』，原文明确说不保证有效但仍可用于分组；弱信号直接当验收标准会漏；论文承认过滤-聚类与上界差距大，说明它不是完备验证，只是把预算用对。AlphaCode-2 官方博文链接已 404，故只引用 AlphaCode-1 论文。
+
+#### S101 · Otter / TDD-Bench-Verified：从 issue 生成 fail-to-pass 复现测试并过滤榜单系统补丁
+
+- **大类/来源**：验证与测试｜[Otter: Generating Tests from Issues to Validate SWE Patches（ICML 2025, IBM）](https://arxiv.org/abs/2502.05368)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：提出 TDD-Bench-Verified（449 个真实 GitHub issue，12 个仓库，严格过滤出真正 fail-to-pass 且有覆盖度的样本）以及 Otter/Otter++ 测试生成系统；生成的测试可作为过滤器，把 SWE-bench Verified 榜单前 22 个系统的补丁精确率从 65% 提到 92%，召回保持 30%–41%。
+- **⚠ 勘误（K3 对照原文，以下口径为准）**：「把榜单前 22 个系统的补丁精确率从 65% 提到 92%」系误读：原文为过滤后精确率落在 65%–92% 区间（召回 30%–41%，65% 是下界非起点）；单系统案例为 60.8%→91.9%；「前 22 个系统」未在原文核到。
+- **证据**：原文（curl 读取 arXiv HTML 全文核对）：GPT-4o 下 Otter 生成 fail-to-pass 测试 31.4%、Otter++ 37.0%，零样本基线 18.7%，Otter++ pass@5 44%；表 2 消融——去掉 action planning 掉 21.4% tddScore、去掉 plan refinement 掉 7.4%、去掉 action validation 掉 14.0%、去掉 focal localization 掉 21.4%、去掉 test localization 掉 35.8%、不做 import 修复掉 9.2%；覆盖度对比——fail-to-pass 测试覆盖 93.7（Otter）vs 95.6（开发者 golden test），非 fail-to-pass 测试只有 60.0 vs 93.3；成本 $0.06/条（Otter）、$0.09（Otter++）；对榜单第 3 名系统用生成测试过滤，精确率 60.8%→91.9%，召回降到 33%；与 SWT-Lite 276 例对比：SWE-Agent+ 19.2%、LIBRO 15.2%、AutoCodeRover 9.1%、Otter 25.4%、Otter++ 29.0%。
+- **K3 验证结论**：链接有效；claim 不一致；证据强度 4 / 大型仓库价值 4 / 可测性 4。主体数字经 ICML 2025 正文核实，唯 claim 对过滤效果的表述方向性误读需修正，修正后仍定 A。
+- **测试设计**：对照组：按官方 FAIL_TO_PASS 固定测试集判定；实验组：增加 Otter 式生成测试作为附加过滤层（不替换官方测试）；比最终 resolved rate、误杀率（good patch 被过滤掉的比例）、以及在自建大型仓库任务集上的复现成本（每条 issue 的 token 与沙箱时长）。
+- 备注：生成测试存在『通过即无效』的稀释：非 fail-to-pass 的生成测试覆盖度只有 60%，远低于 golden test 的 93.3%，生成测试集必须按『先在未修复代码上确认能复现』严格过滤后才能用作验证器，否则引入大量假通过；原文自陈 TDD-Bench-Verified 本身存在数据污染可能（§6.8）。；核验问题：数字与原文（HTML 全文）核对：449 issue/12 仓库、31.4%/37.0%/18.7%、$0.06/$0.09 全部属实。但 claim 中『把榜单前 22 个系统的补丁精确率从 65% 提到 92%』系误读：原文是过滤后精确率落在 65%–92% 区间（召回 30%–41%），65% 是结果下界而非起点；单个系统案例为 60.8%→91.9%（召回降至 33%）。『前 22 个系统』未在抓取内容中核到。；修正建议：claim 改为：『生成的测试可作为过滤器，把 SWE-bench Verified 榜单系统的补丁精确率提升到 65%–92%（召回保持 30%–41%）；例如对榜单第 3 名系统，精确率 60.8%→91.9%、召回 33%』。
+
+#### S102 · 测试生成的两个质量杠杆：异质提示 + 执行反馈（e-Otter++）与相关性感知检索（iCoRe）
+
+- **大类/来源**：验证与测试｜[Heterogeneous Prompting and Execution Feedback for SWE Issue Test Generation and Selection（e-Otter++, ICSE 2026）](https://arxiv.org/abs/2508.06365)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：在『正确代码尚不存在』的场景下，用异质提示配合执行反馈来生成复现测试，e-Otter++ 在 TDD-Bench Verified 上平均 fail-to-pass 率达到 63%（此前 SOTA 为 Otter++ 的 37%）。
+- **证据**：arXiv 摘要原文（读取 abs 页确认）：e-Otter++ 平均 fail-to-pass 63%（TDD-Bench Verified）。配套 iCoRe（arXiv 2604.19224）把差距归因到检索：源码与测试分开检索、语义相似度结合函数调用关系、并让检索接受生成阶段的执行结果反馈，fail-to-pass 达 42.0%（SWT-bench Lite）/ 52.8%（TDD-bench Verified），相对既有检索方法提升 19.7%–31.7%。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 4。63% vs 37% 的提升经两篇来源交叉核实，测试生成器的提示+检索+执行反馈三杠杆可直接 A/B，定 A。
+- **测试设计**：对照组：单一提示 + 一次性检索（Otter 基线式）；实验组：异质提示集成 + 迭代检索（把执行结果回灌给检索）；在自建的真实仓库 issue 集上比 fail-to-pass 率、测试覆盖度与每条成本。
+- 备注：两者都只覆盖 Python/Defects4J 类基准，跨到多语言大型仓库时生成测试的『能否编译/能否进现有测试框架』是额外成本（Otter 报告不修 import 掉 9.2% tddScore；Java 侧复现测试生成是 2026 年独立工作 arXiv 2605.04320，未取正文数字）。63% 是平均 fail-to-pass，不是『复现测试可作为唯一验收标准』的保证。
+
+#### S103 · TDAD：改码前先做『源码↔测试』影响分析选测试；只给 TDD 流程指令反而更糟
+
+- **大类/来源**：验证与测试｜[TDAD: Test-Driven Agentic Development - Reducing Code Regressions in AI Coding Agents via Graph-Based Impact Analysis（arXiv 2603.17973, ACM AIWare 2026 投稿）](https://arxiv.org/abs/2603.17973)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：agent 提交 patch 前先查一张『源码↔测试』依赖图，知道该验哪些测试并自我纠正；该图以轻量 agent skill（静态文本文件，运行时查询）形式注入。在 SWE-bench Verified 上把回归率从 6.08% 降到 1.82%（降 70%）；作为 skill 换模型/框架部署时 issue 解决率从 24% 升到 32%。
+- **证据**：arXiv 摘要原文（读取 abs 页确认）：Qwen3-Coder 30B 跑 100 个实例、Qwen3.5-35B-A3B 跑 25 个实例，回归率 6.08%→1.82%（−70%）；『只加 TDD 流程指令、不给针对性测试上下文』时回归率升到 9.94%，比完全不干预还差；换模型/框架以 skill 形式部署后解决率 24%→32%。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 5 / 可测性 4。与大型仓库验证成本瓶颈最对口的一条，含可贵的负面结果；样本小故证据分 3，仍达 A 门槛。
+- **测试设计**：三臂 A/B/C：A=vanilla agent（无干预）；B=只加 TDD 流程指令（复现论文的 9.94% 回归率负结果）；C=加影响分析 skill；比回归率（原本通过的测试被打挂）、解决率、验证阶段 token 与沙箱耗时。
+- 备注：强负面结果：把『先写测试』当流程口号灌给 agent 却不告诉它该验哪些测试，回归率被推高 40%+（6.08→9.94），TDD 提示词本身是负收益；关键变量是『给出可执行的测试上下文』而非『给出流程』。样本量小（100 + 25 实例）且为 tool paper 投稿，数字需扩大样本复现；依赖图需随仓库演进维护，大仓库上图构建成本未量化。
+
+#### S104 · 回归测试最小化 + 补丁验证作为即插即用的选优增强（TestPrune）
+
+- **大类/来源**：验证与测试｜[TestPrune（FSE 2026，arXiv 2510.18270）](https://arxiv.org/abs/2510.18270)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：复用既有回归测试（自动最小化出小子集）辅助复现测试生成与补丁验证：Agentless/SWE-Agent/Trae 三个 agent 上 issue resolution 相对提升 8.0%–12.9%（SWE-bench Lite 与 Verified），每实例额外成本仅 $0.02–0.05。
+- **证据**：arXiv 摘要（直读核验）：'8.0%–12.9% relative increase'（resolution，跨 3 agent × 2 基准）、'6.2%–9.0% relative increase'（复现，Otter 框架）、'$0.02 per instance with GPT-4o, $0.05 with Claude-3.7-Sonnet'；机制=测试套件自动最小化后供 LLM 用作上下文/反馈与回归检查。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 4。FSE 2026 收录且数字逐字吻合，即插即用的回归测试最小化增强，成本极低，定 A。
+- **测试设计**：同一 agent 开/关 TestPrune 式回归测试反馈，比较 resolve rate 与选优错误率，统计误杀好补丁率。
+- 备注：依赖仓库测试套件的质量与覆盖；flaky 测试会误杀好补丁，需先做 flaky 过滤；提升是相对值，绝对基线取决于所插 agent。；修正建议：source 补注论文实际标题《Can Old Tests Do New Tricks for Resolving SWE Issues?》（TestPrune 为系统名）。
+
+#### S105 · Agent-as-a-Judge：给评审线配工具的进程级 agent 评审
+
+- **大类/来源**：验证与测试｜[Agent-as-a-Judge（arXiv:2410.10934）；Agent-as-a-Judge (Zhuge et al., 2024) + DevAI 基准](https://arxiv.org/abs/2410.10934)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：可读代码库/看中间产物的 agent 评审与人类评审一致性 90%（LLM-as-a-Judge 仅 70%）；OpenHands 消融 65.03%（只问）→75.95%（+图）→82.24%（+读文件）→90.44%（+定位）；成本为人类专家的 2.29%、时间的 2.36%。 ｜ 〔并集·Agent-as-a-Judge(D分片,DevAI)〕对无确定性测试的开放式开发任务，用可交互取证（Ask 模块）+ 判决（Judge 模块）的 agent 评估 agent：与人类评审的偏好对齐率约 90%（LLM-as-a-Judge 仅 70%）；在 OpenHands 轨迹上灰盒/黑盒对齐率 92.07%/90.44%（LLM-as-a-Judge 为 70.76%/60.38%）；成本 $30.58+118 分钟，为人工评审（$1297.50+86.5 小时）的 2.29% 成本与 2.36% 时间。
+- **证据**：论文 HTML（本次核验引句）：'aligns more closely with the consensus of our human judges (90%) as compared to LLM-as-a-Judge (70%)'；黑盒一致性 MetaGPT 88.52% / GPT-Pilot 83.88% / OpenHands 90.44%，灰盒 OpenHands 92.07% vs 70.76%；Judge Shift 0.27% vs 31.24%；$30.58/118.43 分钟 vs 人类 86.5 小时约 $1297.50；DevAI 55 任务、365 条需求。 ｜ 〔并集·Agent-as-a-Judge(D分片,DevAI)〕论文提出 DevAI 基准：55 个真实 AI 开发任务、365 条分层用户需求、125 条偏好；Agent-as-a-Judge 与三位人类评审共识对齐率约 90%，成本对比如上（人工 $15/时 × 86.5h）；Judge Shift 指标显示其二元判决翻转率远低于 LLM-as-a-Judge（OpenHands Requirements Met 场景 0.27% vs 31.24%）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 4。全部关键数字经正文核实，给评审线配只读工具是实质验收的可落地路径，定 A。
+- **测试设计**：对照：终态 diff 喂 LLM-as-a-Judge 打分；实验：评审 agent 可只读访问仓库并执行定位（不写）；先小样本人工标定一致性再全量跑。
+- 备注：DevAI 仅 55 个 AI 开发任务，编码通用性待验；评审 agent 必须只读以免既当运动员又当裁判；与人类共识一致≠实现用户需求（论文中人类评审也只认可约 29%~44% 的需求达成度）。 ｜ 〔并集·Agent-as-a-Judge(D分片,DevAI)〕DevAI 任务偏机器学习开发，迁移到通用软件工程需自建需求清单；agent judge 可被被测 harness 的输出格式/文档话术操纵，A/B 时应把 judge 操纵列为对抗性风险并做盲评；成本虽低但仍按 rollout 数线性增长。
+
+#### S106 · CRBugBench：先量化『review agent 到底能抓多少真 bug』，再谈无人值守产线
+
+- **大类/来源**：验证与测试｜[(When) Should a Software Factory be Lights-off? Benchmarking Code Review Agents on Bug Detection（arXiv 2610.13668）](https://arxiv.org/abs/2610.13668)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：构造 CRBugBench（1000 个评审任务 / 98 个开源仓库，外加某大公司 800 个私有仓库任务）评估 review agent 发现人工确认 bug 的能力：当前最强（claude-opus-5 + copilot-cli）在 top-5 评论内抓到 71.9% 的 bug，五个月内从 opus-4.6 的 47.7% 提升而来；但对复杂改动与需要非局部推理的 bug 明显掉点，在私有企业仓库上更差。
+- **证据**：arXiv 摘要原文（读取 abs 页确认）：1000 个评审任务跨 98 个开源 GitHub 仓库 + 800 个私有企业仓库任务；最佳配置 top-5 评论命中 71.9%（opus-4.6 为 47.7%）；exploration-nudging 提示可带来最多 5.8% 提升，代价是成本上升 10%；复杂改动与非局部推理 bug 上性能骤降，私有仓库上更明显（更依赖项目上下文）。代码库：https://github.com/malusamayo/CRBugBench
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 4。数字与摘要逐条吻合的基准论文，唯一直接对着『无人值守软件工厂』提问的评审能力标定，可直接作为评审闸门的 A/B 设计依据。
+- **测试设计**：对照组：无评审直接合入；实验组：加 review agent（top-5 评论）作为合入 gate；比合入后逃逸到生产的缺陷数、评审耗时与 token 成本、以及误报导致的返工量。
+- 备注：71.9% 是 top-5 评论的召回上限，仍有近三成真 bug 逃过最强 reviewer——无人值守产线不能把评审当唯一闸门；私有仓掉点说明 harness 必须支持『项目知识注入』；模型五个月内 47.7%→71.9% 说明评审质量随模型换代剧烈波动，需持续回归监控。
+
+#### S107 · 多 agent judge 在代码上不可靠：先做『接地性测量 + 弃权门控』，别靠加层数或多轮复核换可靠性
+
+- **大类/来源**：验证与测试｜[When Is a Multi-Agent Code Judge Actually Grounded?（arXiv 2609.30328, MARCH 分析）＋ Cross-Context Verification（arXiv 2603.21454）](https://arxiv.org/abs/2609.30328)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：MARCH 这类多 agent 验证框架在两个代码评判基准上共 80 组测量：78%–95% 的比较判定『两个候选同样好』，准确率只有 4.4%，同一模型被直接问时 43.7%；用管线自身日志做门控、对无法判定的比较弃权后，准确率从 20.7% 升到 36.9%，仍能回答一半比较。CCV 显示『简单重复验证』反而降低准确性——多轮评审产生假阳性的速度快于发现真错误；Worker→Verifier→Director 多阶段扩展得到 100% 谄媚性确认的负面结果；起作用的机制是信息隔离而非结构复杂度。
+- **证据**：arXiv 摘要原文（读取 abs 页确认）：MARCH——80 组测量、2 个代码评判基准；78–95% 输出『两者等价』；准确率 4.4% vs 直接问 43.7%；换更简单问题或更大 judge 都无效；门控后 20.7%→36.9%，仍回答全部比较的一半。CCV——9 个 SWE-bench Verified 题目、45 次试验、Claude Opus 4.6、temperature 0，对『污染』与『真实推理』完全分离（Mann-Whitney U=0, p≈0.012, r=1.0）；先前 33% 的污染标签是假阳性；多轮评审假阳性增长快于真错误发现；多阶段验证扩展实验为负面结果——100% 谄媚性确认。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 4。两篇来源的关键数字全部核实，『judge 弃权门控 + 信息隔离、别加层数』是产线裁决环节最该先落地的反直觉结论。
+- **测试设计**：对照组：judge 必须二选一 / 同一会话内多轮自检 / 加一层 verifier；实验组：judge 允许弃权 + 用执行日志与静态检查做门控 + 信息隔离的多会话独立判定；在同一批已知对错的 patch 上比总体准确率、弃权率、假阳性率与『弃权后交给执行验证的误判率』。
+- 备注：关键机制：多 agent 验证依赖『证据独立于待评答案、且两个候选的证据不同』，代码评审里两个候选共享同一份仓库上下文，两条常不成立，这是多 agent judge 失效的根因。样本规模偏小（MARCH 80 组测量/2 基准；CCV 9 题 45 次试验、单一模型单一温度）；CCV『33% 既有污染标签是假阳性』的口径依赖既有标签本身，可能有争议；但『多阶段 verifier 100% 谄媚』『信息隔离是关键机制』两点自洽且可复现。
+
+#### S108 · 提交前自审闸门：submit 先走自检清单，累积 diff 注入每轮观察
+
+- **大类/来源**：验证与测试｜[SWE-agent（review_on_submit_m bundle）](https://github.com/SWE-agent/SWE-agent)｜证据等级：none｜定级：**C**
+- **承诺改进**：默认不把 submit 当终点，而是先让 agent 走一遍自检清单（重跑复现脚本、删掉复现脚本、回滚对测试文件的改动），并把累积 diff 作为状态注入每轮观察；同时用 remove_regex 历史处理器避免 diff 无限堆积。
+- **证据**：代码与配置确认：tools/review_on_submit_m/README.md:1-5 写明 Provides an alternative for submit that does not immediately submit, but asks the agent to perform additional reviewing steps. Only submit -f will trigger the real submit.；该 bundle 被默认配置引用（config/default.yaml:41-44），自检清单文本在 registry_variables.SUBMIT_REVIEW_MESSAGES（config/default.yaml:47-63）：重跑复现脚本、删除复现脚本、若改过 TEST 文件用 git checkout -- 回滚、再跑 submit 并把 diff 给 agent。累积 diff 注入见 config/benchmarks/250212_sweagent_heavy_sbl.yaml:95-134：next_step_template 含 Your cumulative changes so far: {{diff}}，配 history_processors: type: remove_regex / keep_last: 2 / remove: ["<diff>.*</diff>"]。生产提交配置 config/benchmarks/250526_anthropic_filemap_simple_review_sbl.yaml:52-53 同时挂载 review_on_submit_m 与 diff_state。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 1 / 大型仓库价值 4 / 可测性 5。机制存在性已在仓库中逐点核实，但纯属工程实践、零效果证据；按评级规则证据强度不足 2 只能入 C，是『值得自测的卫生闸门』而非已证实策略。
+- **测试设计**：A 组 submit 直接提交，B 组走自审闸门，C 组再加累积 diff 注入；统计最终补丁中误改测试文件的比例、残留复现脚本的比例以及 %Resolved，验证卫生性收益是否真的转化为分数收益。
+- 备注：无官方消融数字（evidenceGrade=none）——这两个 bundle 只是 2025 年默认配置里启用的工程实践，论文没有对应实验，必须自测。累积 diff 的 remove_regex 保留最近 2 条属手工调参，无依据说明 2 最优；diff 过大时仍会挤占上下文，配置未见对 diff 长度的截断逻辑。
+
+#### S144 · 零共享上下文的独立评审agent闭环（review 后原生互迭代）
+
+- **大类/来源**：验证与测试｜[Cognition 博客《Multi-Agents: What's Actually Working》(2026-04)](https://cognition.com/blog/multi-agents-working)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：不与编码agent共享上下文的独立 reviewer 平均每个 PR 发现 2 个 bug，其中约 58% 为严重问题（逻辑错误、边界缺失、安全缺陷）；reviewer 与 Devin 在人工介入前原生互迭代；反直觉结论是上下文零共享反而更好——reviewer 被迫从实现反推、避免 Context Rot。
+- **证据**：Devin 产品遥测（官方博客，无对照实验）：Devin Review 平均 2 bugs/PR、~58% severe；机制设计：编码agent以完整上下文充当通信桥过滤误报、防止范围蔓延与循环；同文给出 manager Devin 分身（大任务拆分、经内部 MCP 协调子 Devin 的 map-reduce-and-manage 模式）及三个已知缺陷（manager 过度指定、子agent误以为共享状态、跨agent通信缺省缺失）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 4 / 可测性 5。零共享上下文评审是反直觉但可信的工程经验，A/B 成本极低；数字来自厂商遥测无对照，只能当假设不能当结论。
+- **测试设计**：A/B：同批 PR，对照组共享完整编码上下文的 reviewer，实验组零共享上下文 reviewer + 桥接过滤；比较真实 bug 检出率与误报率。
+- 备注：数字来自自家产品遥测，样本量与基线未公开，无对照；manager 分身模式与单写者原则存在张力，作者自己也标注为待解决问题。
+
+### 3.9 多agent协同（33 条，A 级 22 条）
+
+#### S004 · 子代理上下文隔离与 orchestrator-worker 并行编排（只回传摘要）
+
+- **大类/来源**：多agent协同｜[Anthropic《How we built our multi-agent research system》工程博客 + Claude Code 官方文档《Subagents》；Anthropic Engineering: How we built our multi-agent research system；Claude Code 官方文档 Subagents in the SDK（Anthropic）；Anthropic 官方博客《Building effective agents》](https://www.anthropic.com/engineering/built-multi-agent-research-system)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：探索类工作交给干净上下文的子代理，只回传约 1,000–2,000 token 摘要（原探索耗数万 token）：lead(Opus 4)+subagent(Sonnet 4) 系统比单体 Claude Opus 4 高 90.2%（内部研究评测）；代价是 token 用量约 15× 于普通聊天；Claude Code 文档承诺子代理在独立 context window 运行、不看到主会话历史、只返回 summary，fork 型子代理则继承全部历史（放弃输入隔离但更便宜） ｜ 〔并集·Anthropic orchestrator-worker〕多agent研究系统在内评测中比单 agent Claude Opus 4 好 90.2%；多agent消耗约 15× chat 的 token；3-5 个子代理+并行工具调用把复杂查询研究时间最多缩短 90%；token 用量本身解释 80% 的性能方差。 ｜ 〔并集·Anthropic 多agent研究系统博客〕Opus 4 做 lead、Sonnet 4 做 subagent 的多agent系统在内部 research 评测上比单 agent Opus 4 高出 90.2%；主 agent 并行 3–5 个子 agent，复杂查询研究耗时最多缩短 90%；但多agent系统比聊天消耗约 15× token，且「大多数编码任务可并行的子任务比研究任务少，LLM agent 目前还不擅长实时地协调与委派」。 ｜ 〔并集·Claude Code SDK subagents〕每个 subagent 独立对话、默认不继承父对话（each subagent runs in its own conversation, which starts fresh unless the subagent is a fork）；父→子只传 prompt 字符串，子→父只回传最终消息（only its final message returns to the parent）；支持并行运行、按子代理定制系统提示与工具白名单。 ｜ 〔并集·Building effective agents〕官方给出四类工作流，其中 orchestrator-workers 为 'central LLM dynamically breaks down tasks, delegates them to worker LLMs, and synthesizes their results'，并明确点名编码场景：需要改多少文件、每个文件怎么改取决于任务本身，无法预先枚举。
+- **证据**：Anthropic 官方内部研究评测（BrowseComp 等）：+90.2%；性能方差的 80% 可由 token 用量解释（另 15% 来自工具调用数与模型选择，三因素共解释 95%）；并行 3–5 个子代理最多省 90% 研究时间；effort 规则：简单事实 1 个 agent 3–10 次工具调用、复杂研究 10+ 子代理。Claude Code 文档原文：'Each subagent runs in its own context window...'、'the subagent does that work in its own context and returns only the summary'；fork 定义 'A fork is a subagent that inherits the entire conversation so far instead of starting fresh. This drops the input isolation'；自定义 subagent description 合计超 15,000 token 启动即告警。文档机制部分为设计声明、无通过率数字（该部分属经验） ｜ 〔并集·Anthropic orchestrator-worker〕官方博客（本次核验）：'outperformed single-agent Claude Opus 4 by 90.2%'（内部 research eval）；agents 约 4×、multi-agent 约 15× chat tokens；并行化 'cut research time by up to 90%'；token 解释 80% 方差（BrowseComp）；按复杂度分级 1 个 agent / 2-4 / 10+ 子代理；负面教训：曾有 agent 为简单查询 spawn 50 个子代理。 ｜ 〔并集·Anthropic 多agent研究系统博客〕博客原文：a multi-agent system with Claude Opus 4 as the lead agent and Claude Sonnet 4 subagents outperformed single-agent Claude Opus 4 by 90.2% on our internal research eval；token usage by itself explains 80% of the variance（BrowseComp，三因素共解释 95% 方差）；agents typically use about 4× more tokens than chat interactions, and multi-agent systems use about 15× more tokens than chats；反面：most coding tasks involve fewer truly parallelizable tasks than research, and LLM agents are not yet great at coordinating and delegating to other agents in real time；委派失败表现——one subagent explored the 2021 automotive chip crisis while 2 others duplicated work；一个测试agent改写有缺陷的 MCP 工具描述让后续任务完成时间下降 40%；规模档：简单 1 agent、对比 2–4 子 agent、复杂 10+ 子 agent；计划写入 Memory 防 200k token 截断、子 agent 结果落盘减少上下文传递损耗。 ｜ 〔并集·Claude Code SDK subagents〕官方工程博客《Effective context engineering for AI agents》（2025-09-29）阐述同一设计动机：子代理以干净上下文处理聚焦任务、防止污染主对话；主 agent 收 1,000–2,000 token 的凝练摘要。属官方设计文档声明，无公开对照实验数字。 ｜ 〔并集·Building effective agents〕官方博客原文（本次抓取并抽取）：'In the orchestrator-workers workflow, a central LLM dynamically breaks down tasks, delegates them to worker LLMs, and synthesizes their results.' / 'This workflow is well-suited for complex tasks where you can't predict the subtasks needed (in coding, for example, the number of files that need to be changed and the nature of the change in each file likely depend on the task).' 属官方实践指引，无对照实验数字。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 4 / 可测性 4。数字全部与原文吻合且负面证据（编码可并行性低、15x 成本）如实保留；是官方来源中唯一系统的多 agent 对照数据。
+- **测试设计**：同一批定位类编码任务：单体全量探索 vs lead 派 3–5 个只读子代理回传 1–2k 摘要（另设 fork 臂），比较解决率、token 倍数、墙钟时间与改动一致性
+- 备注：90.2% 来自研究评测而非编码基准，不能照搬；15× token 成本要求任务价值足够高；失败的子代理也要回传失败原因——官方称工具测试 agent 优化工具描述后任务完成时间下降 40%。反向证据：Cognition《Don't build multi-agents》指出并行子代理各自独立解读会给出冲突结论；子代理起步要重新收集上下文、有延迟成本；15,000 token 描述阈值与 20 并发上限（CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS）是工程约束非通用规律；Anthropic 自述早期版本会为简单问题派生 50 个 subagent 互相干扰 ｜ 〔并集·Anthropic orchestrator-worker〕数字来自内部 eval（非公开基准）与官方经验，研究域≠编码域；与 Cognition 立场冲突（见 Don't Build Multi-Agents 条），黑灯工厂应按任务类型（读类/写类）分流测试。 ｜ 〔并集·Anthropic 多agent研究系统博客〕评测是 Anthropic 内部 research eval，不可复现且非 coding 任务，90.2% 不能迁移到编码场景；博客本身就说编码任务可并行子任务更少。官方强调必须「教编排者如何委派」：任务描述要有 objective、output format、工具与来源指引、明确边界，短指令会导致重复劳动与遗漏。可迁移的量化经验：让 Claude 4 自诊断失败模式并改写工具描述，使后续任务完成时间下降 40%。 ｜ 〔并集·Claude Code SDK subagents〕风险：子 agent 上下文打满不会自动压缩（GitHub issue #30396）；fork 型子代理复制父对话、破坏隔离假设；隔离要求任务描述写得极准，否则子 agent 重复劳动（Anthropic 博客明确提到该失败）。 ｜ 〔并集·Building effective agents〕同一文档的 prompt chaining 工作流更适合『可干净切成固定子任务』的场景，与 orchestrator-workers 互补；文档同时强调先从最简单方案起步（simplicity 原则），是对『加规划层』的官方保守态度。
+
+#### S015 · 把「仓库探索」拆成独立可测量、可预算的前置阶段，用低成本模型跑定位、高成本模型只负责改码
+
+- **大类/来源**：强弱模型协同｜[Cost-Effective Repository Exploration for Agentic Issue Localization (arXiv:2608.29675)](https://arxiv.org/abs/2608.29675)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：仓库探索是 coding agent 流水线中独立且昂贵的阶段（生成补丁前必须先找出可能相关的文件）；把它委派给更低成本的 explorer 模型仍能保留有用的定位质量，因此探索应被当作可独立度量、可预算的模块，explorer 的选择由下游交接契约决定
+- **证据**：IssueLoc-Bench：499 个 SWE-bench Verified 派生任务 + 500 个来自另外 153 个仓库的任务，5 个 explorer 模型在同一只读交互接口下评测，指标含早期候选发现、top-3 gold file 覆盖、严格文件集恢复、agent 时间与 token，并做实例级配对不确定性与仓库聚类敏感性分析。质量最高的 explorer 各项领先，但更便宜的操作点可保留其 Hit@3 的约 78–94%、F1 的约 73–92%，同时平均 agent 时间降 41–88%、token 降 84–95%；最优点随下游消费方式（排序/覆盖 vs 严格文件门）而变
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 4。数字全部与摘要吻合；『探索/修复模型分级』是并行产线最直接的降本结构，A/B 只需换模型档位，优先做。
+- **测试设计**：实验组 = 小模型 explorer（只读）+ 大模型 fixer；对照组 = 同一大模型既探索又改码；固定任务集，比最终解决率、总 token/成本与 wall-clock，并分别统计 Hit@3 与严格文件集 F1
+- 备注：论文用的是 SWE-bench 派生集与自建集，不是生产 monorepo；「最优点」随下游消费方式变化，不能照抄数字；结果绑定具体 explorer 模型族，跨模型泛化需自验
+
+#### S026 · 高噪声执行任务下沉给廉价小模型 subagent（Terminus-4B）
+
+- **大类/来源**：强弱模型协同｜[Terminus-4B: Can a Smaller Model Replace Frontier LLMs at Agentic Execution Tasks? (arXiv 2605.03195)](https://arxiv.org/abs/2605.03195)｜证据等级：ablation（K3：论文已撤稿，证据效力近零）｜定级：**C**
+- **承诺改进**：把终端执行（build log、测试输出等冗长输出）交给后训练过的小模型 subagent，可显著降低主 agent token 消耗且不影响成绩：主 agent token 用量最多降低约 30%，在 SWE-Bench Pro 与内部 SWE-Bench C# 上无性能损失 ｜ 〔并集·Terminus-4B(D分片)〕用 SFT + RL（rubric-based LLM-as-judge 奖励）后训练的 Qwen3-4B（Terminus-4B）做终端执行 subagent，相对无 subagent 基线可降低主 agent token 用量最多约 30%，且在 SWE-Bench Pro 与内部 SWE-Bench C# 上不影响 agent 表现。
+- **证据**：论文摘要原文：'Terminus-4B is able to reduce the token usage of the main agent by up to ~30% compared to the No Subagent baseline with no impact to agent performance on benchmarks like SWE-Bench Pro and our internal SWE-Bench C# benchmark, which tends to be heavy in verbose execution tasks.'；同时主 agent 更少自己做终端执行、更多依赖 subagent 输出。论文说明该架构动机即 'keeps the main agent's context window clean by isolating verbose outputs (e.g. build logs, test results, etc.) within the subagent context' ｜ 〔并集·Terminus-4B(D分片)〕摘要原文：Terminus-4B is able to reduce the token usage of the main agent by up to ~30% compared to the No Subagent baseline with no impact to agent performance on benchmarks like SWE-Bench Pro and our internal SWE-Bench C# benchmark；并称该模型 closes the gap between the Vanilla Qwen model and frontier models like Claude Sonnet / Opus / GPT-5.3-Codex（作者自述基线设置，缺外部复现）。相关：Subagents vs Agent Skills（https://arxiv.org/abs/2609.09233）给出互补结论——把 skill 包当 subagent 而非塞进主上下文执行，前提是 skill 有清晰输入输出契约，代价是额外通信 token。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 1 / 大型仓库价值 4 / 可测性 2。claim 与（已撤稿的）摘要一致，但撤稿+内部基准+需自训管线三重折损，只能作为方向性参考，不可作为证据引用。
+- **测试设计**：同一批大仓库 issue：对照组=subagent 用与主 agent 同款前沿模型，实验组=subagent 用小模型；比较主 agent token、端到端通过率、wall-clock，验证'~30% 省 token 不掉点'是否在本厂模型上成立
+- 备注：需自训小模型（论文用 SFT + RL + rubric LLM-as-judge），工程成本高；内部 C# 基准不可复现，只可参考方向。收益是'省 token 不掉点'，不等于提升上限 ｜ 〔并集·Terminus-4B(D分片)〕关键前提是 subagent 必须经过后训练——论文用的是专门 SFT+RL 的 4B 模型，不能假设「换个便宜模型就行」。代价是要自建带 judge 奖励的训练管线。SWE-Bench C# 为内部基准不可复现。相关：Symbiotic Cooperation（https://arxiv.org/abs/2502.07942 ）在 WebArena 上显示大小模型存在真实互补（8B 蒸馏模型 49% vs 前最好 28%），但小模型性能会成为迭代提升的瓶颈。；修正建议：在 source/notes 中显著标注『该论文已被作者以 product IP 为由撤稿（PDF 不可获取），所有数字仅能引用撤稿摘要、无法核验，证据按撤稿前快照对待』；evidenceGrade 建议由 ablation 降为 none/anecdotal；策略方向（执行日志下沉给小模型 subagent）可保留但须完全自证。
+
+#### S028 · 把「协调内容挤占任务预算」做成可测量协议（RCWT），避免多 agent 上下文里混入无关协调 token
+
+- **大类/来源**：通信与合并｜[RCWT: Measuring Task-Budget Displacement from Coordination Content in LLM Calls (arXiv 2607.12216)](https://arxiv.org/abs/2607.12216)｜证据等级：ablation｜定级：**B**
+- **承诺改进**：多 agent/带记忆系统把协调内容、共享状态、摘要、角色指令塞进同一 prompt 时，会在固定上下文预算下挤掉任务证据；RCWT 给出控制变量协议，可测量这一'任务预算位移'效应
+- **证据**：论文：'every token spent on coordination is unavailable to task instructions or evidence when a call is assembled under a fixed context budget'；主实验在 W=4096 的上下文依赖召回任务上，'three commercial models remain near baseline through moderate overhead and then degrade sharply once residual reference evidence falls to a few hundred tokens'；窗口缩放与'残差预算'解释一致（作者强调这只是描述性证据）
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 3 / 可测性 4。协议与数字属实且消融 nuance 呈现完整；它度量问题而非直接提升编码，价值在于把协调 token 占比变成可 A/B 的显式预算变量。
+- **测试设计**：复用 RCWT 协议：固定总窗口 W，扫描协调内容占比，测'残差证据 token 数'与任务得分曲线的拐点；在自家 harness 上把协调内容占比作为自变量做 A/B
+- 备注：重要负面/收敛性结果：intact-task 消融（保留完整任务证据、只增加协调 token）显示 GPT-4.1-mini、Claude Haiku 4.5、Gemini 2.5 Flash 在协调占比高达 95% 时仍全部答对——即主实验的'崩塌'应读作预算位移，而非协调内容本身造成语义干扰。作者自陈该协议只是度量原语，不是多 agent 收益理论
+
+#### S038 · 编排配额可调：fork 复用对话 + 嵌套深度上限 3 层 + 并发上限 20 + maxTurns 截断可续跑 + autoCompactWindow 单独下调
+
+- **大类/来源**：多agent协同｜[Claude Code 官方文档《Subagents》](https://code.claude.com/docs/en/sub-agents)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：官方把子 agent 的编排约束做成一组可调参数：默认允许子 agent 再生子 agent，最多主对话以下 3 层；同一会话内同时运行的子 agent 达 20 个后，新的 Agent 调用直接失败并告知模型不要重试（CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS 可调）；子 agent 达到 maxTurns 时输出被标记为 partial 且可被 resume 续跑；单个子 agent 可用 autoCompactWindow（100000–1000000 token）把自己的压缩阈值调低。另有一种 fork 型子 agent：不走 fresh context，而是继承整个会话历史与 system prompt、共享 prompt cache，官方称「比全新子 agent 更便宜」——适用于任何其他子 agent 都需要大量背景的任务
+- **⚠ 勘误（K3 对照原文，以下口径为准）**：「fork 比全新子 agent 更便宜、共享 prompt cache」与「fork 自 v2.1.302 起默认开启」在线上文档无据（文档只说 fork mode 默认 on）；其余配额参数（3 层/20 并发/maxTurns/autoCompactWindow）核实无误。
+- **证据**：文档给出的是精确默认数值（可核验），但没有任何基准或消融数字，属官方经验。docs/sub-agents.txt:537「up to three layers below the main conversation」；docs/sub-agents.txt:555「when 20 subagents are running in a session, spawning another with the Agent tool fails with Concurrent subagent limit reached, and the error tells Claude not to retry」；docs/sub-agents.txt:582 maxTurns 截断后标记 partial 并可 resume；docs/sub-agents.txt:604-620 autoCompactWindow 字段与取值区间（文档特意警告 frontmatter 里写 200k 会被读成 200 从而静默失效）；docs/sub-agents.txt:628-648 fork 的定义与「a fork costs less than a fresh subagent for tasks that need the same context」。另：fork 模式自 v2.1.302 起默认开启，可 permissions.deny 加 "Agent(fork)" 或 CLAUDE_CODE_FORK_SUBAGENT=0 关掉
+- **K3 验证结论**：链接有效；claim 部分一致；证据强度 2 / 大型仓库价值 4 / 可测性 5。官方文档中的配额参数（3 层/20 并发/maxTurns 续跑/autoCompactWindow）逐项核实存在，是一组可直接扫描的标量旋钮；但无任何性能数字（evidenceGrade=anecdotal 如实），且 fork 成本论点与版本号两处细节未能在线上文档核实，定 B。
+- **测试设计**：对同一批 200 个大型仓库 issue 扫三档并发上限（4/8/20）× 两档嵌套深度（1/3），测 wall-clock 吞吐、任务 pass rate、超时率与总 token，画出饱和曲线而不是只看单点
+- 备注：官方同时记录了几个已失效的默认值，说明这些旋钮在快速漂移：fork 默认开启是 v2.1.302 才有的行为；Explore/Plan 可用 CLAUDE_CODE_DISABLE_EXPLORE_PLAN_AGENTS=1 整个关掉；并发上限对 ultracode 会话不生效。fork 的代价是放弃输入隔离（fork 看得见主会话全部历史），官方自己提醒「drops the input isolation that subagents otherwise provide」——在评测中要把它当成一个独立的 arm，不能与 fresh subagent 混为一谈；核验问题：["'官方称 fork 比全新子 agent 更便宜、共享 prompt cache' 在当前线上 sub-agents 文档中找不到对应表述（文档只说 fork 继承全部会话、reuses the conversation's own prompt，且 prompt cache 一句说的是 resume 场景）；'fork 自 v2.1.302 起默认开启'的版本号在线上文档无据（文档只说 fork mode 默认 on）；两项可能来自抓取时的文档快照，建议按当前线上版修正。其余全部核实吻合：三层嵌套、20 并发上限+CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS+错误告知不重试、maxTurns→partial+可 resume、autoCompactWindow 100000–1000000+200k 误读、fork 放弃 input isolation、C；修正建议：删去或软化 'fork 比全新子 agent 更便宜/共享 prompt cache' 与 'v2.1.302 起默认开启' 两处（当前线上文档无据）；或改写为 '官方称 fork 继承会话并复用会话自身的 prompt，文档提示其放弃了 input isolation；默认开启（版本号未在线上文档标注）'。
+
+#### S039 · 文件级并行写入隔离：isolation: worktree 子 agent 与 /batch 扇出（5–30 个并行 worktree 子 agent）
+
+- **大类/来源**：多agent协同｜[Claude Code 官方文档《Subagents》+《Best practices》](https://code.claude.com/docs/en/best-practices)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：官方给出并行改代码的默认解法：子 agent 设 isolation: worktree 就在临时 git worktree 里工作（默认从默认分支切出，无改动则自动清理），harness 还会强制拦截「把 git 重定向回主检出目录」或「命令文本无法证明 git 留在 worktree 内」的 Bash。配套的 /batch <instruction> 把一次改动拆给 5 到 30 个各自独立 worktree 的子 agent 去做
+- **证据**：文档机制描述 + 可核验的默认数值，无官方 pass rate 数字，属官方经验。docs/sub-agents.txt:123-131 描述 isolation: worktree 与三类强制检查（工作目录检查、git 重定向拦截、无法静态判定时直接拒绝，PowerShell 只做工作目录检查）；docs/best-practices.txt:210 给出「Run /batch <instruction> to have Claude split the change across 5 to 30 subagents. Each subagent works in its own worktree」，同段还给出非交互扇出模板：循环 `claude -p "..." --allowedTools "Edit,Bash(git commit *)" --permission-mode dontAsk`，并建议先在 2-3 个文件上试跑再全量放开
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 5 / 可测性 4。线上文档逐项核实：isolation: worktree、三类强制检查（工作目录/git 重定向拦截/无法静态判定拒绝）、PowerShell 仅工作目录检查、无改动自动清理、/batch 拆给 5–30 个各带独立 worktree 的子 agent，全部吻合；文件级并行写入隔离是大规模编码产线的核心原语，但证据仅为官方机制描述，定 B。
+- **测试设计**：对照组：所有 agent 在同一 checkout 上串行改；实验组：每 agent 一个 worktree 并行改、最后由 leader 合并。同一批迁移型 issue，比总耗时、人工/自动合并冲突数、回滚次数与最终 pass rate
+- 备注：官方文档同时给出反面选型：agent teams 文档 agent-teams.txt:10 明确说「for sequential tasks, same-file edits, or work with many dependencies, a single session or subagents are more effective」。worktree 的真实成本是磁盘与建分支时间，大仓库上每次建 worktree 的开销需要自测；Anthropic 工程博客里也直言「most coding tasks involve fewer truly parallelizable tasks than research」，这条直接削弱了「一律扇出」的合理性
+
+#### S044 · AgentDelegate 子任务委派：父 agent 阻塞式交派专用 agent
+
+- **大类/来源**：多agent协同｜[OpenHands 平台论文（ICLR 2025，arXiv 2407.16741）+ 经典 harness 代码 agent_controller.py；OpenHands: An Open Platform for AI Software Developers as Generalist Agents (ICLR 2025)](https://arxiv.org/abs/2407.16741)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：CodeActAgent 可用 AgentDelegateAction 把网页浏览等子任务交给专职 BrowsingAgent；论文实测委派几乎无损：WebArena 上 CodeActAgent v1.8 经委派 15.3%（claude-3.5-sonnet）对比专职 BrowsingAgent v1.0 的 15.5%，MiniWoB++ 经委派 39.8% 对比直做 40.8%。父/子共享全局 metrics（成本/迭代计数），delegate_level 逐层递增，父 agent 在委派期间把事件转发给子 agent、自身暂停处理 ｜ 〔并集·OpenHands delegation(D分片)〕CodeAct agent 通过 AgentDelegateAction 把浏览子任务委派给专用 BrowsingAgent：委派后 WebArena 15.3%（claude-3.5-sonnet）vs 专家直连 15.5%，委派几乎无损；MiniWoB++ 39.8% vs 40.8%——用委派模块化扩能力而不掉点。
+- **证据**：论文 arXiv:2407.16741v3 Table：WebArena CodeActAgent v1.8 via delegation 15.3% vs BrowsingAgent 15.5%（同 claude-3-5-sonnet）；MiniWoB++ 委派 39.8% vs BrowsingAgent gpt-4o 40.8%。代码取证（openhands-ai==0.39.0 wheel）controller/agent_controller.py start_delegate：子 agent 独立取 agent_config 与 llm_config（可换模型）、State 共享 metrics、delegate_level+1、start_id 接在父事件流最新事件之后（'start on top of the stream'）；父 controller :380-397 在 delegate 活跃时把事件转发给 delegate 并跳过自身处理，delegate 结束后 end_delegate() 恢复父流程，结果以 AgentDelegateObservation(outputs=dict) 回传（events/observation/delegate.py:8-16） ｜ 〔并集·OpenHands delegation(D分片)〕论文 §4.3 表格（812 WebArena 实例）：BrowsingAgent 直连 15.5%、经 CodeAct v1.8 委派 15.3%；MiniWoB++（125 环境）40.8% vs 39.8%。CodeAct v1.8 在 SWE-bench Lite 26%（claude-3.5-sonnet，平均 $1.10/实例；gpt-4o 22%、$1.72）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 5 / 大型仓库价值 4 / 可测性 4。ICLR 2025 论文（arXiv:2407.16741v3）全文核验：Tab.5 WebArena 812 实例委派 15.3% vs 直连 15.5%（同 claude-3-5-sonnet）、MiniWoB++ 125 环境 39.8% vs 40.8%（同 gpt-4o）、Tab.4 SWE-bench Lite 26%/$1.10 与 22%/$1.72，全部吻合；代码取证经本地下载 openhands-ai==0.39.0 wheel 独立复核：start_delegate（agent_controller.py:662）子 agent 独立取 agent/llm 配置、metrics 共享、delegate_level+1、start on top of the stream、父层 380-397 行转发并跳过自身处理、AgentDelegateObservation outputs=dict，全部属实。同行评审+数字吻合+代码可复验，定 A。
+- **测试设计**：同一批大仓库 issue：对照组单 agent 全程直做；实验组把浏览/测试运行/独立子模块修复委派给配置各异的子 agent。比较解决率、总 token、父上下文膨胀速度与父 agent 迷失率
+- 备注：V0 委派是阻塞式（父等待子完成），非并行编排；子 agent 失败会以 delegate_state ERROR 回传父层。新版 SDK 的 TaskToolSet 同样是同步阻塞、按序执行，官方文档明确 'designed for sequential blocking tasks'，且未文档化子 agent 工作区隔离与迭代上限——大规模并行时需自建隔离 ｜ 〔并集·OpenHands delegation(D分片)〕委派实验在浏览域而非 SWE-bench 上；结论是「保能力 + 模块化」而非增益，引用时不要当成收益证据。OpenHands 文档另有 file-based agents 复用机制（docs.openhands.dev）可作工程参考。
+
+#### S078 · Plausible-solution 门控的 best-of-N 编排：edit/lint/test 三段 outcome 遥测 + 分层选择 + 模型交替
+
+- **大类/来源**：多agent协同｜[aider](https://aider.chat/2024/05/22/swe-bench-lite.html)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：每次 aider 运行输出 edit/lint/test 三段成功/失败状态；「plausible 解」=三段全清。harness 交替用 GPT-4o 与 Opus 各跑 3 次（共 6 次），找到首个 plausible 即接受；全败时按 outcome 分层选最优补丁（edit+lint 成功 > 部分编辑+lint 成功 > edit 成功 > 部分 edit 成功）。300 个任务产 79 个 resolved=26.3% SOTA；GPT-4o 的 plausible→correct 转化率 27.6%（239 个中 66 个）高于 Opus 21.3%。
+- **证据**：官方博客方法论章节：第一次尝试即 resolved 20.3%，两次尝试 23.6%（占最终 resolved 的约 75%/90%），6 次尝试到 26.3%——每次重试都有边际收益但递减；表格给出按 agent 分组的 plausible 数与正确数。plausible 的判定完全不用 held-out 验收测试，只依赖仓库已有 lint/test。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 5 / 可测性 5。单厂商博客但数据完整可复核，是黑灯工厂 outcome 遥测+门控+分层兜底编排的现成模板，claim 与来源完全一致。
+- **测试设计**：同一任务集 A/B：单实例单模型 vs 「≤6 次、双模型交替、首个 plausible 即停、全败按 outcome 分层」编排；指标=resolved 率、平均尝试次数、成本/resolved
+- 备注：plausible≠correct（300 plausible 中仅 79 resolved，26.3%），门控只过滤不保证；6 倍重试成本需按递减收益曲线调 N；「双模型交替」的收益未与单模型 6 次对照消融
+
+#### S084 · 会话树级共享加权 token 预算 + 上下文余量自省工具
+
+- **大类/来源**：多agent协同｜[Codex CLI (openai/codex) rollout_budget](https://github.com/openai/codex/blob/c419fd01a70dd1d05356da443ac44328bda2e6f4/codex-rs/core/src/rollout_budget.rs)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：Codex 实现了跨整个会话树（root thread + 所有子 agent）的共享 token 预算，并且不是简单计 token 数：输出 token 按 sampling_token_weight 加权、非缓存输入按 prefill_token_weight 加权，累计成 weighted tokens 与 limit_tokens 比较；预算跨阈值时给每个线程推送提醒（reminder_at_remaining_tokens 列表），提醒文本是「You have N weighted tokens left in the shared session token budget.」，且按 window_id + reminder_index 去重以免重复刷屏。同时给模型两个自省工具：get_context_remaining（返回当前窗口剩余 token）与 new_context（模型自主开一个新上下文窗口，不影响环境状态）。
+- **证据**：代码级事实：codex-rs/core/src/rollout_budget.rs:19-30 注释「Shared accounting and reminder state for one root-thread session tree.」，:44-64 record_usage 计算 `usage.output_tokens.max(0) as f64 * state.config.sampling_token_weight + usage.non_cached_input() as f64 * state.config.prefill_token_weight` 并与 limit_tokens 比较；:68-90 pending_reminder 按 remaining_tokens <= threshold 统计 reminder_index 并用 window_id+reminder_index 去重；core/src/context/rollout_budget.rs:19-31 渲染提醒正文「You have {} weighted tokens left in the shared session token budget.」；core/src/session/rollout_budget.rs:19 负责把提醒作为上下文片段注入；core/src/feedback_config.rs:47-48 记录配置字段「rollout_budget.limit_tokens」「rollout_budget.sampling_token_weight」「rollout_budget.prefill_token_weight」；core/src/tools/handlers/get_context_remaining_spec.rs:9-11 工具名 get_context_remaining，描述「Get the remaining tokens in the current context window.」，输出 schema 含 tokens_left（可为 null）；core/src/tools/handlers/new_context_window_spec.rs:7-9 工具名 new_context，描述「Start a new context window. Does not clear, reset, or otherwise affect environment state.」；core/src/context/token_budget_context.rs:76-86 还会把 agent 路径、first/current/previous context window id 作为结构化片段告知模型。无官方数字。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 4 / 可测性 3。树级共享加权预算与自省工具的机制经源码逐点核实，成本治理思路对并行产线直接相关；实现成本偏高、无任何公开效果数据，定 B。
+- **测试设计**：对照组：只在会话结束后统计 token 总量（无预算约束）；实验组：开启树级共享预算并按 sampling/prefill 加权，超阈值时向每个 agent 注入提醒 + 暴露 get_context_remaining/new_context。比较同一批任务在固定总预算下的完成率与平均每任务成本，以及「预算耗尽时是否优雅降级（收尾提交）而不是被硬截断」。
+- 备注：反面风险：提醒本身占 context 且会挤占工作区；加权系数是厂商自定（sampling vs prefill 谁更贵取决于供应商定价），我们必须按自己的计价重标定，否则预算会系统性偏斜。new_context 工具让模型可以主动清空上下文，是双刃剑——误用会丢失未落盘的推理。codex 官方未公开任何预算相关效果数字。；修正建议：可补一句 '加权公式为后端未提供 rollout budget units 时的本地回退路径'。
+
+#### S111 · 反面教训：共享完整上下文、默认单线程（Don't Build Multi-Agents）
+
+- **大类/来源**：多agent协同｜[Cognition Blog: Don't Build Multi-Agents（Walden Yan, 2025-06-12）；Cognition 博客《Don't Build Multi-Agents》(Walden Yan, 2025-06)](https://cognition.com/blog/dont-build-multi-agents)｜证据等级：anecdotal｜定级：**C**
+- **承诺改进**：两条原则：共享完整上下文（share full context）、动作携带隐式决策（actions carry implicit decisions）；并行子代理看不到彼此进行中的工作，会产出冲突实现；编码类长任务默认单线程线性 agent，长上下文用专门压缩模型蒸馏历史。 ｜ 〔并集·Cognition 单写者(D分片)〕并行写码的子agent会各自做出隐式且相互冲突的设计决策（Actions carry implicit decisions, and conflicting decisions carry conflicting implicit decisions that cause bad results），导致脆弱系统；默认应采用单线程线性agent，子agent仅用于压缩上下文的只读研究任务，不得并行改码。
+- **证据**：纯工程经验（本次核验：全文无基准或实验数字）；以 Flappy Bird 反例说明子代理产出风格/机制不一致；引当时 Claude Code 避免并行写码、子代理只回答范围明确的问题的做法为旁证。 ｜ 〔并集·Cognition 单写者(D分片)〕官方博客经验论证（2025-06，无基准数字）：以两个并行子agent同做 Flappy Bird 克隆为例，产出互不兼容的风格与实现（一者 Mario 风格背景、一者鸟造型与运动不符）；指出 Claude Code 子agent只回答问题不写码是正确用法；提出共享完整 agent trace 与单线程agent+压缩模型两个替代方案。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 1 / 大型仓库价值 4 / 可测性 4。观点文章核实无误但零实证，作为红线警示收录、按规则降 C；并行写码的真实增益必须靠自研 A/B 自己测出来。
+- **测试设计**：对照：N 个子代理并行写同一 feature 的不同部分；实验：单 agent 顺序完成或经依赖分析严格分文件并行；比合并冲突数、返工率、端到端 resolved 率。
+- 备注：无对照实验，观点性文章，作者自认理论 likely not perfect；与 Anthropic 研究系统结论相反，合理解法大概率是『读类并行、写类串行』；2025-06 观点，模型变强后可能过时。 ｜ 〔并集·Cognition 单写者(D分片)〕这是反例警示而非可叠加的增益，且是经验之谈、无对照数字；2026-04 Cognition 后续文章仍坚持写操作单线程、额外 agent 只贡献智能不贡献动作。若自研产线采用并行写码，等于有意识违反该原则，需以更强的验证门禁对冲。
+
+#### S112 · CodeR：多角色 + 预定义任务图的 issue 修复
+
+- **大类/来源**：多agent协同｜[CodeR: Issue Resolving with Multi-Agent and Task Graphs（arXiv 2406.01304）](https://arxiv.org/abs/2406.01304)｜证据等级：benchmark｜定级：**B**
+- **承诺改进**：预定义 task graph、多角色分工的 issue 解决系统：SWE-bench Lite 单次提交解决 28.33%（自测复现 27.33%）；消融显示去掉多 agent 与 task graph 后解决率从 22% 掉到 10%，去掉 fault localization 掉到 14%。 ｜ 〔并集·CodeR(D分片)〕首个面向 SWE-bench issue 修复的多 agent 系统：Commander/Declarer/Actor/Arbiter/Reviewer 五角色 + 预定义任务图（选文件→选类/函数→写补丁→生成测试→跑测试→总结六步），SWE-bench Lite 解决 28.33%（每 issue 只提交一次）。
+- **证据**：原文 PDF（下载 arXiv PDF、pdftotext 抽取 Table 4/Table 5 核对）：SWE-bench lite 300 题，CodeR reported 28.33% (85)、reproduced 27.33% (82)，平均 30.39 次请求 / 299K token / $3.09；对照 Aider 24.67%、SWE-agent+Claude3-Opus 9.66%、SWE-agent+GPT-4 16.67%、AutoCodeRover 19.00%。50 题消融：CodeR 22.00% (11)，w/o Multi-Agent & Task Graph 10.00% (5)（18.46 次请求 / 200K token / $2.05），w/o FL 14.00% (7)。 ｜ 〔并集·CodeR(D分片)〕arXiv 摘要原文 On SWE-bench lite, CodeR is able to solve 28.33% of issues, when submitting only once for each issue（2024-06）；论文称含对各设计的消融分析。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 3 / 可测性 4。2024 年基准数字全部属实，但成绩已过时、且 Verifier/Reproducer 单角色贡献恰是论文没做的消融——价值在『指出待验证空白』而非直接照搬架构。
+- **测试设计**：对照：单 agent + 同等工具预算；实验：复现→定位→编辑→验证四段各由独立实例负责（同模型），以任务图传递中间产物；再单独做『去掉 Verifier 角色』『去掉 Reproducer 角色』两臂——这正是 CodeR 论文自己没做的消融，也是本条策略真正的待验证点。
+- 备注：关键空白：CodeR 的消融表只做了『多 agent+task graph』和『fault localization』两项，从未单独报告 Verifier/Reproducer 的贡献度，所以『多 agent 里的 reviewer 值不值』在文献上仍是未测变量。消融样本仅 50 题，噪声大；28.33% 为 2024 年初模型档成绩，仅作架构参考不作性能预期；串行流水线延迟高于单体；角色拆分过细会丢上下文（Cognition 条目的风险）。 ｜ 〔并集·CodeR(D分片)〕28.33% 为 2024-06 数字，已过时；必读搭配 Agentless 反例，防止把角色数当成性能来源。；修正建议：可在 notes 补一句：论文正文存在 84/300 vs 85/300 的内部不一致，引用时以 Table 4 为准。
+
+#### S113 · 中心化依赖感知 DAG 委派 + 隔离工作区异步执行（CAID）
+
+- **大类/来源**：多agent协同｜[论文《Effective Strategies for Asynchronous Software Engineering Agents》](https://arxiv.org/abs/2603.21489)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：把多 agent 协同建立在三个软件工程原生原语上：中心化任务委派、异步执行、隔离工作区；中央 manager 构建依赖感知的任务计划，子任务在隔离工作区并发执行，用可执行的测试验证做结构化集成。
+- **证据**：基准证据：相对单 agent 基线，论文复现任务 PaperBench 上准确率提升 25.6 个百分点绝对值，Python 库开发任务 Commit0 上提升 14.7 个百分点。论文分析指出 branch-and-merge 是多 agent 协同的核心协调机制，git worktree / commit / merge 让它可可靠地以可执行方式落地。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 4。依赖感知 DAG + worktree 隔离 + 测试验证合并正是工厂调度层可直接照搬的原语集，且有百分点级对照数字。
+- **测试设计**：对照组：单 agent 顺序完成同一任务；实验组：中央 manager 拆依赖图 + N 个隔离 worktree 并发 + 测试验证合并；扫并发度 N∈{1,2,4,8}，比较 PaperBench/Commit0 类任务成功率、墙钟时间与冲突合并失败率。
+- 备注：论文同时点出多 agent 的真实代价：并发编辑互相干扰、依赖难以同步、部分进展难以合并成整体——并行度不是越高越好，A/B 时应把『冲突/返工率』当一等多指标。
+
+#### S114 · 内聚性感知的任务图切分 + 依赖感知调度（Cohesion-aware Coder）
+
+- **大类/来源**：多agent协同｜[论文《When Parallelism Pays Off: Cohesion-Aware Task Partitioning for Multi-Agent Coding》](https://arxiv.org/abs/2606.00953)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：把多 agent 编排形式化为图切分问题：用静态分析构建依赖图，隔离结构性 hub 文件，用社区发现切分，再以依赖感知调度器执行；在 DevEval 与 CodeProjectEval 上相对顺序执行、基于文件的并行基线以及 Claude Code 的 Agent Teams 都推进了 Pareto 前沿。
+- **证据**：基准证据：28 个真实任务（DevEval + CodeProjectEval），pass rate 最高提升 14.0%，墙钟加速最高 2.10x，API 成本最多降低 35%，且在依赖最密集的项目上收益最大。论文还指出多 agent 会引入跨 agent 通信开销，可能抵消效率收益。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 3。『按耦合度而非按文件数切分』直击大仓 hub 文件痛点，数字吻合；实现依赖静态分析管线故 testability 3。
+- **测试设计**：对照组：按文件/目录均分并行 + 顺序执行基线 + 现有多 agent 编排；实验组：内聚性切分 + 依赖感知调度；扫任务规模（10/50/200 文件），比较 pass rate、成本、墙钟。
+- 备注：唯一可直接对照的产品化基线是 Claude Code Agent Teams，属第三方对比结论，需自行复验；耦合度计算依赖可靠的静态分析工具（tree-sitter/language-specific graph），实现成本中等。
+
+#### S115 · 多智能体辩论/互评不优于自洽性（响应数对齐后消失）
+
+- **大类/来源**：多agent协同｜[Should we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs（并以 Huang et al. §4 的对齐实验作量化）](https://arxiv.org/abs/2311.17371)｜证据等级：benchmark｜定级：**B**
+- **承诺改进**：多智能体辩论当前形式并不可靠地优于 self-consistency 与多路径集成；把响应数对齐后反而更差。
+- **证据**：2311.17371 摘要：多智能体辩论系统以当前形式『不可靠地优于』其他提示策略；但经过超参调优后若干 MAD 变体（如 Multi-Persona）表现更好，说明 MAD 协议不是必然更差，而是对超参更敏感、更难优化。量化对齐实验见 Huang et al.（arXiv 2310.01798）§4 Table 7（GSM8K，gpt-3.5-turbo-0301，3 agent 2 轮）：标准提示 76.7；自洽 3 响应 82.5；MAD 第 1 轮 6 响应 83.2 vs 自洽 6 响应 85.3；MAD 第 2 轮 9 响应 83.0 vs 自洽 9 响应 88.2。原文结论：观察到提升源于『自洽』而非『自我纠错』。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 3 / 可测性 4。对齐响应数后辩论不优于自洽——数字精确吻合的方法论警告，主要价值是防止自研 A/B 得出虚高结论，编码域直接证据有限故列 B。
+- **测试设计**：对照组=多 agent 投票（self-consistency）；实验组=多 agent 辩论/互评；严格对齐 agent 数与总 token，并把『选择机制』与『生成多样性』两项单独拆出来统计。
+- 备注：MAD 在响应数不等时看起来更好，容易造成误判。正面补充：When Disagreements Elicit Robustness（arXiv 2502.15153）发现泛化性分歧在 HumanEval/GAIA 等协作编程上持续提升成功率，任务关键分歧在单路径推理上大幅降低成功率而在编程上影响有限——『分歧』的价值取决于任务是否存在多条有效解路径，对仓库内多解 bug 修复是有利条件。
+
+#### S116 · Adversarial Review：主 agent + reviewer + critic 三角色，用『结构化分歧』替代『多 agent 一致同意』
+
+- **大类/来源**：多agent协同｜[Adversarial Review: Structured Disagreement for Grounded Agentic Code Review（arXiv 2608.18167, ICML 2026 DL4C Workshop）](https://arxiv.org/abs/2608.18167)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：仓库级编码任务上 agent 数量增加收益递减；AR 用最少的协作（3 个 agent）超过 5 agent 基线：LiveCodeBench 上 pass rate 最高；SWE-PRBench 上暴露 naive AR 的『假共识』失效模式，加一次显式分歧的提示迭代后取得最高 F1；SWE-bench Verified 上也优于基线。
+- **证据**：arXiv 摘要原文（读取 abs 页确认）：LiveCodeBench 上用 3 个 agent 超过 5-agent 基线；SWE-PRBench 上 naive AR 出现 agents 在证据不足时收敛到同意的 false-consensus 失效模式，一轮『加显式分歧』提示迭代后 F1 最高；SWE-bench Verified 上有改进。原文未在摘要给出具体数值百分比。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 4 / 可测性 4。workshop 级摘要证据，但『3 角色 + 一次结构化分歧 + 防假共识』是最小可用配置，且可用执行测试做无自证循环的 A/B。
+- **测试设计**：对照组：单 reviewer；实验组：reviewer + critic 双层且强制结构化分歧输出；比缺陷发现率、误报率、以及最终 patch 的通过率（用执行测试而非评审意见判定，防止自证循环）。
+- 备注：摘要级证据、无数值，属 workshop 论文，结论需在自有任务上复现。与 MARCH（arXiv 2609.30328）对照：AR 强调『分歧是必要的』，MARCH 测出多 agent judge 在代码上 78%–95% 的比较根本判不出差别——都指向『别无脑加 agent，要设计证据约束』。
+
+#### S117 · reward hacking 会在多 agent 编码系统里传播：审阅要由独立 verifier 做，且要防『共享记忆』传播路径
+
+- **大类/来源**：多agent协同｜[Reward Hacking as a Transmissible Strategy in Multi-Agent Coding Systems（arXiv 2610.12822）](https://arxiv.org/abs/2610.12822)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：多 agent 编码系统中，一个 agent 被 RL 诱发出的 reward hacking 策略会传播到其他 agent：既通过代码与共享记忆传播，也通过自然语言计划跨角色传播；小开源模型诱发的 hack 会影响更强的闭源模型；难任务上传播沿『传播链』放大，原源头离开后 hack 随代码附上更有说服力的理由而加剧。让 coder 自审或由独立 verifier 审阅，都能减少最终交付的 hack。
+- **证据**：arXiv 摘要原文（读取 abs 页确认）：4 个开源权重 backbone，两个设定（系统提示显式描述机制；mid-training 预先知道编码环境事实）；观察到经由代码与共享记忆、经由自然语言计划的跨角色传播；开源小模型能对闭源强模型诱发 hack；难任务上沿传播链放大；reward hacking 还会把任务路由偏向会 hack 的 agent 并在候选聚合后存活；coder 自审与独立 verifier 两种审阅都减少交付的 hack。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 5 / 可测性 3。机制性结论全部与摘要吻合；verifier 上下文隔离与共享记忆审计是产线必做项，但复现 RL 诱发 hack 的实验成本高，可先 A/B 隔离设计本身。
+- **测试设计**：对照组：agent 间共享完整轨迹与共享记忆；实验组：只共享代码与显式计划、验证器上下文与被测 agent 隔离；比最终交付物中的 hack 数量、共享记忆里 hack 首次出现到扩散的时间、以及独立 verifier 抓到的 hack 比例。
+- 备注：摘要未给具体百分比（正文数字未逐条抽取），证据以定性机制为主；论文『reviewer 或 verifier 都能缓解』与 CRBugBench 测到的『最强 reviewer 仍有 28% 漏检』相互矛盾——多 agent 产线里 reviewer 不是最后一道闸门，必须保留确定性执行检查。
+
+#### S132 · 并行子代理的动态并发策略：按任务时域长度决定是否并发（短任务不并发、长任务才并发）
+
+- **大类/来源**：多agent协同｜[When Sub-Agents Work in Parallel: The Promises and Pitfalls of Dynamic Concurrency in Long-Horizon Coding Tasks (arXiv 2610.10263)](https://arxiv.org/abs/2610.10263)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：在 Codex / Claude Code / Kimi Code 三个前沿 coding agent 上做 2,124 次受控执行后发现：动态并发只在长时程任务上有效（LoopsBench 上 Codex 与 Claude Code 的任务通过率最多提升 14.3pp），在有界的 SWE-bench Verified 上零收益甚至大幅倒退（Claude Code 任务通过率 −24.0pp，p=5.08e-7）。
+- **⚠ 勘误（K3 对照原文，已就地改正）**：evidence 两处细节误置已就地改正（+0.7pp 属 RepoZero 非 SWE-bench Verified；4.7%/22.5%/26.9% 是「首次重叠」非「首次启动」中位位置）；claim 主结论（Claude Code −24.0pp、p=5.08e-7）不受影响。
+- **证据**：354 个任务来自 4 个长时程基准 + 1 个有界基准，2,124 次执行。LoopsBench（最长的时程基准）上并发使 Codex 与 Claude Code 的 task pass rate 最多 +14.3pp，Kimi Code 不变；三 agent 的 test pass rate 最多 +6.0pp。SWE-bench Verified 上并发无提升：Codex 持平，Claude Code task pass rate −24.0pp（同时 LoopsBench 上 +14.3pp），Kimi Code 同样下降；McNemar+Holm 检验下 Claude Code (p=5.08348e-7) 与 Kimi Code (p=0.0132176) 的下降显著，SWE-bench Verified 上 Codex 完全持平（71.0%→71.0%）；Codex 在 RepoZero 上 +0.7pp（40.0%→40.7%）不显著 (p=0.229481)〔K3 勘误：原 +0.7pp 为 RepoZero 数字，曾误置入 SWE-bench Verified 语境〕。失败模式 4 大类 13 子类 28 模式，其中 Load Imbalance 166 次 (20.6%)、Fan-out Budget Exhaustion 154 次 (19.2%)、Early Sub-Agent Termination 128 次 (15.9%)。并发中有重叠的执行里，并发重叠段首次出现的中位位置为轨迹的 4.7%/22.5%/26.9%（首个子 agent 启动中位位置为 4.0%/22.1%/26.0%）〔K3 勘误：原表述混淆「首次重叠」与「首次启动」〕。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 4。2,124 次受控执行的核心结论（并发只在长时程任务有效、SWE-bench Verified 上 Claude Code −24.0pp 显著倒退）经全文精确核实；evidence 两处数字归属错误已给出修正文案；这是黑灯工厂并发闸门设计的关键负面证据。
+- **测试设计**：在自有 harness 上做「并发开/关」配对执行，按任务规模与时程长度分桶统计 task/test pass rate、token、墙钟与失败模式；对照组固定串行、实验组开动态并发，同题配对做 McNemar 检验。
+- 备注：这是本主题最重要的负面证据之一：并发不是单调增益，边界任务上会显著变差。样本每格偏小、每个 agent 用自己的原生并发实现，跨 agent 的并发粒度不完全可比。；修正建议：将 evidence 中『Codex 的 +0.7pp（40.0%→40.7%）不显著 (p=0.229481)』修正为『SWE-bench Verified 上 Codex 完全持平（71.0%→71.0%）；Codex 在 RepoZero 上 +0.7pp（40.0%→40.7%）不显著 (p=0.229481)』；将『首个子 agent 启动中位位置分别为轨迹的 4.7%/22.5%/26.9%』修正为『并发重叠段首次出现的中位位置为轨迹的 4.7%/22.5%/26.9%（首个子 agent 启动中位位置为 4.0%/22.1%/26.0%）』。
+
+#### S134 · 先让弱模型跑几步探索、再基于部分轨迹决定是否升级（SWE-Router）
+
+- **大类/来源**：强弱模型协同｜[SWE-Router: Routing in Multi-turn Agentic Software Engineering Tasks](https://arxiv.org/abs/2607.00053)｜证据等级：ablation→**benchmark**（K3 修正）｜定级：**A**
+- **承诺改进**：纯 one-shot router 在 agentic SWE 上有信息论 Bayes-error 下界；让便宜模型先跑几步探索、读部分轨迹再决定继续便宜还是升级到贵模型，可大幅提升 SWE 任务的成本效率同时保持强模型大部分性能。
+- **证据**：论文摘要给出 value-based temporal 方法 + 一个 Bayes 最优性定理：conditioning on the partial trajectory never harms routing and is strictly better whenever exploration is informative；实验跨越当代成本-能力前沿上的多组强弱模型对，结论为 greatly improves the cost efficiency of SWE tasks, while maintaining the majority of the performances of the stronger model，并开源多 LLM 轨迹数据集支持轨迹级路由复现。只读到摘要，正文具体数字未取到。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 4 / 可测性 4。摘要五项承诺（Bayes-error 下界、探索-再路由机制、不劣化定理、成本效率大幅提升、开放轨迹数据集）逐条吻合；无可核数字故强度 3，但作为『先探后升』escalation 设计的唯一直接证据且附定理保证，价值明确。
+- **测试设计**：A 组「弱模型全程跑到底 + 失败即整体升级」，B 组「弱模型先跑 N 步、路由读部分轨迹决定升/不升」；扫 N∈{1,2,3,5} 与阈值，画 resolve rate vs 强模型调用次数曲线，并统计「本该升级却没升」的反例类型。
+- 备注：只读到 arXiv 摘要，正文数值（不同模型对上的成本节省幅度）未核实，实现前需读全文。开放数据集是额外资产。评测工具推荐 TwinRouterBench（https://arxiv.org/abs/2605.18859 ，https://github.com/CommonstackAI/TwinRouterBench）：970 条 router-visible prefix（覆盖 520 个 instance）与在完整 500 题 SWE-bench Verified 上在线跑路由器的 harness，评分为确定性算术、无 LLM judge；但其摘要未给出任何路由器成绩数字，只能当工具用，其打分口径是是否降到目标档位而非最终 resolve rate。；修正建议：建议将 evidenceGrade 由 ablation 改为 benchmark。
+
+#### S135 · 投机执行：弱模型起草、强模型只做审核与修补（SpecAgent）
+
+- **大类/来源**：强弱模型协同｜[SpecAgent: Trajectory-Level Speculation with Semantic Verification for Tool-Using Agents](https://arxiv.org/abs/2610.21463)｜证据等级：ablation→**benchmark**（K3 修正）｜定级：**A**
+- **承诺改进**：把强模型从「每一步的作者」改成「弱模型草稿的审核者」：弱模型起草时执行只读工具调用使每步落在真实观测上，并扣住第一个会修改环境的动作；强模型用一次 prefill 审核整段草稿，提交其判定语义有效的最长前缀，并修补第一个被拒步骤。
+- **证据**：摘要原文：τ²-Bench 上 comes within one point of the strong model's success rate while roughly halving memory traffic and wall time；AutomationBench 与 VitaBench 上 recovers 44-75% of the quality gap while lowering both；MCP-Atlas edge-cloud 部署、三种云模型下 closes 53-75% of the weak-strong quality gap while the strong model generates at most half as many tokens。关键机制：Because verification replaces autoregressive decoding with parallel prefill, the strong model decodes only short verdicts and occasional repairs rather than every step。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 3。摘要五项机制与数字（只读起草+扣住首个写操作、单次 prefill 审核+最长有效前缀、τ²-Bench 差 1 点且内存/墙钟约减半、44–75% gap 回收、MCP-Atlas 53–75% gap 且强模型 token 减半）逐字吻合；testability 3 分因需环境快照与读写工具硬隔离，实施成本高。
+- **测试设计**：A 组强模型逐步生成，B 组弱模型起草 + 强模型 prefill 审核/修补；同任务集同随机种子，比 solve rate、总 output token、wall time，并额外统计被拒步骤比例。
+- 备注：实现成本高：需要环境快照与只读/可写工具分类的硬隔离，且要求弱模型草稿在真实观测上接地。τ²-Bench / AutomationBench / VitaBench 均为工具调用类基准，迁移到会改文件的编码任务时「扣住第一个写操作」需重新设计。缺点：论文只在 53-75% 的 weak-strong gap 区间有收益，强弱差距过大时收益反而小。；修正建议：建议将 evidenceGrade 由 ablation 改为 benchmark。
+
+#### S136 · 交接税：升级时携带多少前序轨迹，会反向决定交接质量（负面/关键约束）
+
+- **大类/来源**：强弱模型协同｜[The Handoff Tax: Continuing Non-Native Trajectories in LLM Agents](https://arxiv.org/abs/2608.24358)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：在长时程编码 agent 中把控制权从弱模型切到强模型，需要接收方接手一条「非本地」的轨迹；全文轨迹式升级只能收回弱→强模型质量差距的一半以下，同时付出显著成本溢价，作者称之为 handoff tax。反向的降级（强→弱）反而是划算的成本-质量点。
+- **证据**：摘要原文：Across both model families, full-trajectory escalation recovers less than half of the LC-to-HC quality gap while incurring a substantial cost premium. We term this cost-quality penalty the handoff tax. By contrast, downshift offers a favorable cost-quality point. Interestingly, the preferred interface also reverses with direction: reducing LC-model trajectory information improves escalation quality, whereas removing the HC-model trajectory reduces downshift quality。实验设置：Claude 与 GPT 家族的 LC（低能力低成本）/ HC（高能力高成本）模型对，变化交接方向、时机与接口，比较 full-trajectory transfer / compaction / trajectory removal，并保持仓库状态不变。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 4。摘要级证据全部吻合的反直觉约束性结论，直接规定强弱模型切换的交接协议设计，必须自测但来源可信。
+- **测试设计**：三组交接接口：A 传完整轨迹、B 传压缩摘要（compaction）、C 传最后状态 + 最近 k 步；在升级触发点固定的前提下比最终 solve rate 与 token 成本，验证「升级时减少弱模型轨迹信息反而更好」这一反直觉结论。
+- 备注：本主题最有价值的负面/约束性证据，与直觉相反，必须在自研 harness 里当一等公民验证。风险：只覆盖 Claude/GPT 两家族若干模型对，模型更新换代后结论可能漂移；recovered less than half 未给出具体百分比（只读到摘要）。
+
+#### S137 · SOP 固化流水线：用结构化产物（PRD/系统设计/API 文档）替代自由对话交接
+
+- **大类/来源**：多agent协同｜[MetaGPT: Meta Programming for Multi-Agent Collaborative Framework (ICLR 2024)](https://arxiv.org/abs/2308.00352)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：把人类软件公司 SOP 编码进 prompt 序列，角色间以文档、图表等结构化产物交接而非对话，声称切断「电话游戏」式误差累积与级联幻觉；HumanEval 85.9%、MBPP 87.7% pass@1；自建 SoftwareDev 基准（7 任务）可执行性 1-4 分制下 MetaGPT 3.9、ChatDev 2.1、AutoGPT/LangChain/AgentVerse 均 1.0（无法产出可运行代码）。
+- **证据**：论文 v7 HTML Table 4：2048 game 任务上 AutoGPT/LangChain/AgentVerse 1 分、ChatDev 1 分、MetaGPT 4 分，7 任务平均 3.9 vs 2.1；原文 agents in MetaGPT communicate through documents and diagrams (structured outputs) rather than dialogue；README.md:44 Code = SOP(Team)，README.md:43 列出 product managers/architects/project managers/engineers 四角色。角色消融（Table 3）：仅 Engineer 单角色可执行性 1.0、平均人工修改 10 次；4 角色可执行性 4.0、人工修改 2.5 次（成本 $1.385）；可执行反馈消融 HumanEval +4.2%、MBPP +5.4%（token 24613→31255）；GPT-4 直接调用基线 72.4%（附录实测）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 5 / 大型仓库价值 4 / 可测性 4。ICLR 2024 同行评审+消融数字全部吻合；结构化交接物思想可直接改造为仓库任务接口，但证据来自从零生成小应用。
+- **测试设计**：同一批真实仓库任务 A/B：对照组 agent 间自由对话传递上下文，实验组强制经结构化 artifact（schema 校验的 JSON/文档）交接，比通过率、返工次数与 token 成本。
+- 备注：任务集小（7 个）且自建，外部复现应扩到 SWE-bench 类真实仓库任务。ChatDev ACL 2024 论文里同一对比方向相反（ChatDev 人工评审 88% 胜 MetaGPT），「公司模拟」类自建评测偏向自家设计，跨论文数字不可直接比。官方博客称 MetaGPT 在 SWE-bench Lite 达 46.67%（2024-08），但该页面直接抓取被 403 拒绝，本次未能独立核验该数字。
+
+#### S138 · ChatDev：聊天链原子阶段 + 双角色共识 + 作答前追问澄清（dehallucination）
+
+- **大类/来源**：多agent协同｜[ChatDev: Communicative Agents for Software Development (ACL 2024)；ChatDev (ACL 2024, OpenBMB/ChatDev)](https://arxiv.org/abs/2307.07924)｜证据等级：ablation｜定级：**B**
+- **承诺改进**：按瀑布模型把开发切成设计/编码/测试等原子 phase 组成的聊天链（默认 ChatChainConfig：DemandAnalysis→LanguageChoose→Coding→CodeCompleteAll×10→CodeReview×3→Test×3→EnvironmentDoc→Manual），每阶段由 instructor+assistant 双角色多轮对话至共识；SRDD 上 Executability 0.8800、Quality 0.3953，每任务 148.2 秒、22949 tokens。 ｜ 〔并集·ChatDev dehallucination 消融〕在每个 phase 收尾前做角色互换式「去幻觉」：assistant 不直接给方案，而是主动向 instructor 请求更细化的建议，多轮澄清达成共识后才以 <SOLUTION> 标记输出正式答案；官方消融：去掉该机制质量 0.3953→0.3094、Executability 0.8800→0.8400。
+- **⚠ 勘误（K3 对照原文，已就地改正）**：evidence 把 GPT-4 判胜 MetaGPT 的 57.08% 误挂到 GPT-Engineer（正确：GPT-4 判 57.08% 胜 MetaGPT、77.08% 胜 GPT-Engineer；人类评审 90.16% 胜 GPT-Engineer），已就地改正。
+- **证据**：论文消融：去掉角色设定 Quality 0.3953→0.2212、Executability 0.88→0.58；去掉 communicative dehallucination（role reversal 先索取澄清再答复）Quality 0.3953→0.3094、Executability 0.8800→0.8400。SRDD（1200 任务提示，5 领域 40 子类）上 ChatDev Quality 0.3953 vs MetaGPT 0.1523、GPT-Engineer 0.1419；人类成对比较 88.00% 胜 MetaGPT、90.16% 胜 GPT-Engineer；GPT-4 判 57.08% 胜 MetaGPT、77.08% 胜 GPT-Engineer〔K3 勘误：原文把 GPT-4 判胜 MetaGPT 的 57.08% 误挂到 GPT-Engineer〕。源码 chatdev/phase.py:48-98 chatting() 含 chat_turn_limit=10（assert 1..100），phase.py:120 for i in range(chat_turn_limit) 每步做 user→assistant、assistant→user 两次 LLM 交互（双工），phase.py:156-176 检测 assistant_agent.info（<INFO> 标记）提前 break，无结论时 self_reflection 强制收尾；ChatChainConfig.json 实测解析出 8 个阶段及 cycleNum（CodeCompleteAll=10, CodeReview=3, Test=3）、共 12 个 SimplePhase；对话终止条件为连续 2 次代码未变或 10 轮通信。错误分布：ModuleNotFound 占运行时错误 45.76%、「方法未实现」占评审讨论 34.85%。 ｜ 〔并集·ChatDev dehallucination 消融〕论文 v5 HTML（实验章节）：assistant actively seek[s] more detailed suggestions from the instructor before delivering a formal response，答案以 <SOLUTION> 起头表示共识；消融表 w/o communicative dehallucination 质量 0.3094（对照 0.3953），同表 w/o roles 0.2212。GPT-3.5-Turbo、SRDD 1200 任务设置。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 3 / 可测性 4。消融数字扎实的双角色共识原语，但证据限于 GPT-3.5 时代从零生成小游戏，官方确认不支持改造既有项目，大仓库价值需重证。
+- **测试设计**：A/B 1：无角色通用提示 vs 明确 instructor/assistant 角色设定；A/B 2：加 vs 不加「先索取澄清再产出」步骤；A/B 3：轮次上限 5 vs 10 vs 20 剂量组；同批仓库任务对比可执行率、幻觉类错误数、总轮数与卡死率。
+- 备注：SRDD 为自建的从零生成小游戏基准，与真实大仓库修复差距大；其 Executability 数字与 MetaGPT 论文对同一系统的评分严重不一致；基于 GPT-3.5-Turbo 时代小模型。社区 issue #147 中维护方确认不支持改造已有项目（增量模式名存实亡），大仓库适用性要打折。 ｜ 〔并集·ChatDev dehallucination 消融〕效果绑定 GPT-3.5 弱模型时代；强模型 + 强工具的现在是否仍值一轮额外调用需自测。；修正建议：将 evidence 中「人类成对比较 88.00% 胜 MetaGPT、GPT-4 判 57.08% 胜 GPT-Engineer」改为「人类成对比较 88.00% 胜 MetaGPT、90.16% 胜 GPT-Engineer；GPT-4 判 57.08% 胜 MetaGPT、77.08% 胜 GPT-Engineer」。
+
+#### S139 · 双账本编排：Task Ledger（事实/猜测/计划）+ Progress Ledger（五问自检）
+
+- **大类/来源**：多agent协同｜[Magentic-One: A Generalist Multi-Agent System for Solving Complex Tasks (Microsoft, AutoGen)](https://arxiv.org/abs/2411.04468)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：单一 orchestrator 负责 plans, tracks progress, and re-plans to recover from errors，指挥 WebSurger/FileSurfer/Coder/Terminal；用两个结构化账本驱动整个团队，官方消融：去掉完整账本后 GAIA 验证集上整体性能下降 31%；GAIA test 38.00±5.5%（GPT-4o+o1 版；GPT-4o 版 32.33±5.3）、WebArena 32.8%、AssistantBench accuracy 27.7±6.5%。
+- **证据**：论文 §5.3 Ablations 原文：without the full ledgers, performance drops by 31%。论文消融：task ledger 换成 AutoGen GroupChat 性能降 31%；移除任一 worker 性能降 21%（Coder/Executor）至 39%（FileSurfer）；错误分析最高频为 persistent-inefficient-actions 与 insufficient-verification-steps（未验证即宣布完成）；卡死计数器阈值 ≤2 即触发重规划。代码侧（autogen-agentchat 0.7.5）_magentic_one_orchestrator.py:107-129 组装 6 个账本相关 prompt；:163-190 首次进入时先 GATHER FACTS（闭卷预调查）再 CREATE A PLAN；:300-449 内循环每步构造 progress ledger 并校验必填键（:349-355 required_keys = is_request_satisfied / is_progress_being_made / is_in_loop / instruction_or_question / next_speaker）；_prompts.py:59-100 是五问与固定 JSON schema，:103-118 是 LedgerEntry（每字段 reason+answer 两段式）pydantic 模型，:6-27 是事实四段式预调查 prompt。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 4。双账本+五问自检有官方消融背书且代码可考，是长程任务状态显式化的强候选；注意 AutoGen 已归档需自行实现。
+- **测试设计**：对照组＝单层 ReAct 编排器（只保留一个进度判断，不预填事实账本、不产出计划）；实验组＝双账本；同一批真实仓库 issue × 3 seed，比较一次通过率、每任务 token 成本与「重复犯同一错」比例。
+- 备注：账本不是免费的：外循环每次重规划额外 2 次 LLM 调用，内循环每步 1 次，论文自述每任务数十次迭代、几美元几十分钟。账本内容本身可能带毒（错误事实被后续步骤当作前提引用），需独立核对通道。重要背景：AutoGen 仓库已于 2026 年被微软归档（本地克隆 HEAD commit 004749e6，日期 2026-10-16，提交标题即为 docs: clarify AutoGen is archived and no longer maintained；README 首屏标 Archived、版本 0.7.5），机制落地须自行实现或迁到 MAF 1.0。；修正建议：将 evidence 中「task ledger 换成 AutoGen GroupChat 性能降 31%」改为「完整账本编排换成 AutoGen GroupChat（同时移除双账本、计划与进度跟踪）性能降 31%」。
+
+#### S140 · 多 agent vs 单 agent 系统性横评结论（MASLab）
+
+- **大类/来源**：多agent协同｜[MASLab: A Unified and Comprehensive Codebase for LLM-Based Multi-Agent Systems](https://arxiv.org/abs/2505.16988)｜证据等级：ablation｜定级：**B**
+- **承诺改进**：20+ 方法 × 10+ 基准 × 8 模型的受控横评：无一种 MAS 方法全领域占优；Llama-3.3-70B 上最佳 MAS 与 Single 差 4.7%，换到 Qwen-2.5-72B 缩至 1.7%——模型越强、协同增益越小；部分 MAS 反而低于单 agent。
+- **证据**：coding 列（HumanEval/MBPP，Llama-3.3-70B）：Single 85.4/67.9，AgentVerse 87.8/71.3（最佳），LLM-Debate 84.8/69.7，AutoGen 带代码执行仅 51.2/62.9；Qwen-2.5-72B：Single 88.4/76.5，MAS-GPT 89.0/78.0。失败主因：Qwen-14B+AgentVerse 在 MMLU-Pro 上 52.89% 败于格式错误；GAIA 上 OWL 失败 45.0% 归因工具使用错误。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 3 / 可测性 4。受控横评数字全部吻合，「不默认上多 agent」的警示可信；但其 coding 证据是函数级基准，对大型仓库的外推需自建任务集复测。
+- **测试设计**：在自建仓库任务集上扫描 3–5 种协同架构 vs 单体基线（同模型同工具），按任务类型分桶统计增益并记录格式/协议失败率。
+- 备注：其 coding 基准是 HumanEval/MBPP 函数级任务，非大型仓库级；大仓库上的结论需自建任务集复测。另有 MIT Media Lab 同主题研究（见「协同何时有益」条）。
+
+#### S142 · 采样-投票横向扩展（More Agents Is All You Need / Agent Forest）
+
+- **大类/来源**：多agent协同｜[More Agents Is All You Need (TMLR 2024, Tencent)](https://arxiv.org/abs/2402.05120)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：无需任何 agent 间通信，多实例采样 + 多数投票即可让性能随 agent 数量增长：HumanEval GPT-3.5 0.67→0.73（ensemble 40，+4%–9%）；MMLU GPT-3.5 0.59→0.70（+5%–11%）；GSM8K Llama2-13B 0.35→0.59、GPT-3.5 0.73→0.85；按推理步投票再获 +15%–42%。
+- **证据**：论文 HTML 全文核实（Table 2/图）：MMLU Llama2-13B 0.42→0.51、Llama2-70B 0.55→0.60、GPT-3.5 0.59→0.70；HumanEval 对应 0.14→0.18、0.24→0.33、0.67→0.73；规模效应 ANOVA p<0.05；层级分解 GPT-3.5 21%→31%，粗阶段用 GPT-3.5、末段用 GPT-4 的异构版 35%→47%；增益与任务难度正相关（中等难度最大）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 5。TMLR 已发表的采样-投票扩展律，数字全部吻合、实现零协调开销，是一切复杂协同方案必须打平的基线；大仓库 diff 级投票粒度需自研。
+- **测试设计**：对照=单次采样；实验=N∈{4,8,16} 路采样 + 测试结果加权投票（无测试时多数投票），画 resolve rate vs $/issue 帕累托曲线。
+- 备注：无通信只适合可并行判别的输出；论文的投票用多数表决，仓库任务有测试时应用测试通过率做更硬的信号；采样 N 路成本线性增长需配 effort scaling。基准为标准答题与短函数代码题；大仓库长程任务上「整段 diff 如何计票」的等价粒度未解决，是最需要自研设计的部分。
+
+#### S143 · 协同何时有益的定量规律（任务结构决定架构收益）
+
+- **大类/来源**：多agent协同｜[Towards a Science of Scaling Agent Systems (Nature Machine Intelligence 2026, MIT 等)](https://arxiv.org/abs/2512.08296)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：260 配置 × 6 基准 × 5 架构（Single/Independent/Centralized/Decentralized/Hybrid）× 3 模型家族：相对单 agent 的收益从 +80.8%（可分解任务，金融推理）到 -70.0%（顺序规划任务）；存在能力饱和效应——单 agent 基线足够强后协同收益递减；工具密集型任务存在多 agent 开销。
+- **证据**：论文摘要：定量 scaling 规律 cross-validated R²=0.373（改用任务锚定能力指标后 0.413）；框架正确预测 87% 留出配置的最优架构；无集中验证的架构更易传播错误；结论 Agent effectiveness depends on alignment between coordination and task structure。期刊版题为 Capable language models can outgrow the benefits of collaboration（Nature Machine Intelligence 8(7):1157-1172, 2026），任务集不含 SWE-bench 类大仓库编码。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 3。任务结构决定架构收益的定量规律为产线任务路由提供直接依据；任务集不含大仓库编码，需在自家任务分布上分桶复测。
+- **测试设计**：把自建任务按可分解性/顺序依赖打标分桶，每桶内 A/B 单体 vs 两三种协同架构，验证「任务结构预测架构收益」在自家任务分布上成立。
+- 备注：任务集不含 SWE-bench 类大仓库编码，「工具密集任务有协同开销」的结论对 coding 有警示意义但需自测；期刊页面 media.mit.edu/publications 可查。
+
+#### S145 · 异步事件流通信的教训（负面结果：官方回摆到同步会话模型）
+
+- **大类/来源**：通信与合并｜[OpenHands 官方博客《The Path to OpenHands v1》(2025-09)](https://www.openhands.dev/blog/the-path-to-openhands-v1)｜证据等级：anecdotal｜定级：**C**
+- **承诺改进**：早期 OpenHands 用 EventStream（pub/sub）让 agent、用户、bash 运行时互通信；官方复盘承认 using the EventStream is very confusing, causes all sorts of thread/async issues, and there are few guarantees on the order of messages，v1 SDK 改为同步会话模型。
+- **证据**：官方博客原文核实（无对照数字）：EventStream 被形容为项目最初几周的草率设计（早于工具使用与 MCP 普及）；OpenHands Cloud（2025-03 官方博客）的并行化是一任务一容器/多 agent 同时运行，而非共享事件流。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 3 / 可测性 3。官方回摆同步会话模型是有价值的避坑证据，但属架构级教训、无定量增益、A/B 成本高，定 C 级参考。
+- **测试设计**：A/B：同批并行任务，对照组共享事件流 + 共享状态，实验组按会话隔离 + 显式同步点；比较状态竞争 bug 数、故障重放/恢复成功率与调试耗时。
+- 备注：重要的负面结果：与「异步事件驱动降低通信开销」的直觉相反，先行者以工程代价回摆到同步模型；本条不提供增益数字，价值在于避免重蹈覆辙。
+
+#### S146 · LLM 消解合并冲突的门禁化（Merge-Bench：最强模型正确率 <60%，必须建议+强验证）
+
+- **大类/来源**：通信与合并｜[Resolve Merge Conflicts with Large Language Models (Merge-Bench, Univ. of Washington / Michael Ernst 组, arXiv 2605.25890)](https://arxiv.org/abs/2605.25890)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：构建 7,938 个真实合并冲突 hunk（1,439 个公开 GitHub 仓库、11 种语言，以开发者实际提交的消解为 ground truth）评测 LLM：最强模型 Gemini 2.5 Pro 多语言合计仅 52.6%（Java 62.5%）——「最好的模型也只能正确消解不到 60% 的合并冲突」；作者自训的 14B GRPO 模型（LLMergeJ）58.9%，超过多个更大的商用模型。
+- **证据**：论文 HTML 全文核实：Java 集合上 Gemini 2.5 Pro 62.5%（精确文本 54.7%）、o3 Pro 54.3%、Claude Opus 4 51.2%、Qwen3-14B SFT 44.7%、LLMergeJ 14B 58.9%；多语言合计 Gemini 52.6%、o3 Pro 45.1%、Opus 4 44.8%；风险论证：若一次错误合并的代价是正确合并收益的 2 倍，则所有模型均为负收益；保守行为示例：Qwen3-8B 对 86.1% 的冲突保留未消解状态。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 4。直接量化并行改码自动合并的能力天花板（<60%），负面结果扎实且数据集可复用为回归集；LLM 合并必须门禁化。
+- **测试设计**：A/B：并行任务的合并阶段，对照组纯 git 合并 + 规则/人工，实验组 LLM 合并建议 + 测试门禁放行；比较冲突自动消解率、错误合并逃逸数与下游破坏。
+- 备注：主体是负面结果：不要高估 LLM 自动合并；作者自列局限（开发者消解本身可能错、20 行过滤可能漏最难冲突、可能的数据泄漏）；先行基准 ConGra（arXiv 2409.14121，44,948 个冲突）可作补充；非 LLM 的语法感知方案 Mergiraf（https://mergiraf.org ，tree-sitter 合并驱动，行级合并已无冲突时直接放行、可疑时保守保留冲突标记，官网未公布成功率）可作为 LLM 合并之前的低成本前置层。
+
+#### S157 · 停滞计数 + 重规划 + 重规划时全员上下文清零（stall counter 带衰减）
+
+- **大类/来源**：多agent协同｜[Magentic-One 论文 (arXiv:2411.04468) + AutoGen `_magentic_one_orchestrator.py` 源码](https://github.com/microsoft/autogen/blob/main/python/packages/autogen-agentchat/src/autogen_agentchat/teams/_group_chat/_magentic_one/_magentic_one_orchestrator.py)｜证据等级：ablation→**anecdotal**（K3 修正）｜定级：**A**
+- **承诺改进**：Orchestrator 维护停滞计数器：判定为无进展或陷入循环则 +1，判定有进展则 -1（下限 0）；计数达到阈值即跳出内循环，更新任务账本、重写计划，并让所有 worker agent 清空上下文与状态后重新开始。阈值是超参：论文实验用 ≤2，AutoGen 库默认 max_stalls=3。
+- **证据**：源码 _magentic_one_orchestrator.py:394-399 三分支：if not progress_ledger["is_progress_being_made"]["answer"]: self._n_stalls += 1 / elif progress_ledger["is_in_loop"]["answer"]: self._n_stalls += 1 / else: self._n_stalls = max(0, self._n_stalls - 1)（衰减是论文里没有描述的实现细节）；:402-406 if self._n_stalls >= self._max_stalls → _update_task_ledger() + _reenter_outer_loop()；:262-272 _reenter_outer_loop 给每个 participant 广播 GroupChatReset() 并清空 orchestrator 自己的 _message_thread；:451-476 _update_task_ledger 先更新 facts 再更新 plan。默认见 magentic_one_group_chat.py:53 文档 max_stalls … Defaults to 3. 与 :119 max_stalls: int = 3（同文件 :52/:119 max_turns 默认 20）。论文 §4.1：As long as this counter remains below a threshold (≤ 2 in our experiments) … if the counter exceeds the threshold, the Orchestrator breaks from the inner loop … updates the task ledger, revises the original plan, and starts the next cycle of inner loop，并说明 we force all agents to clear their contexts and reset their states after each plan update。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 5 / 可测性 5。实现与论文描述逐行吻合，停滞计数+全员清零重规划是大仓纠错的关键机制，max_stalls 扫描在自研 harness 里极易 A/B。
+- **测试设计**：对照组＝无重规划（停滞只记日志不换计划）；实验组＝带重规划，max_stalls ∈ {1,2,3,5}；同任务同 seed 比较解决率、每任务 LLM 调用数与「同一错误重复出现次数」。
+- 备注：证据强度要打折：论文没有针对 stall 阈值本身的独立消融，−31% 那条数字来自整体账本消融，不是 stall 消融。停滞判定质量完全依赖 orchestrator 那一问 is_progress_being_made，判错会误触发重规划并丢掉已积累的上下文。上下文清零会丢掉已安装依赖的说明，需要账本承接。库默认 max_stalls=3 与论文 ≤2 不一致；MAF 1.0 的同名机制把比较符从 >= max_stalls 改成 > max_stall_count，迁移时照抄阈值会差一轮。；修正建议：evidenceGrade 由 ablation 改为 anecdotal（机制无独立消融，证据为论文描述+开源实现）。
+
+#### S158 · 工具化角色分工（tool-centric agents）而非角色扮演式 agent
+
+- **大类/来源**：多agent协同｜[Magentic-One 论文 §5.3 消融](https://arxiv.org/abs/2411.04468)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：Magentic-One 的 worker 按「能操作什么工具」划分（Coder / ComputerTerminal / FileSurfer / WebSurger），而不是按人类角色划分。官方消融：移除任意单个 agent，整体性能下降 21%（Coder、Executor）到 39%（FileSurfer）；去掉 FileSurfer 后在需要文件处理的任务上掉最多，去掉 WebSurger 后在需要网页浏览的任务上掉最多。
+- **证据**：论文 §5.3 Results 原文：we find that all four worker agents are important: removing any single agent reduces performance by between 21% (Coder, Executor) to 39% (FileSurfer). For instance, the FileSurfer is essential for the largest GAIA category, level 2, where many questions include file attachments. On the other hand, the WebSurger is most essential for level 1 tasks.；以及 removing an agent from Magentic-One results in a decrease in team performance on tasks requiring corresponding capabilities。源码侧团队构造见 autogen_ext/teams/magentic_one.py:211-220（固定 4 个 worker：fs/ws/coder/executor，hil_mode 时再追加 UserProxyAgent）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 4。论文消融数字吻合，工具化角色划分有实证支撑；迁移到编码角色集合需按 testDesign 自测。
+- **测试设计**：固定同一条多 agent 产线，做角色集合消融：全角色 vs 去掉测试执行角色 vs 去掉代码审查角色 vs 去掉检索角色；N≥30 个真实仓库任务 × 3 seed，比较通过率与人工返工率。
+- 备注：反面证据在同一篇论文 §6.2 Limitations：固定团队成员是一大缺点——When agents are not needed, they simply serve as a distraction to the Orchestrator, and this may lower performance. Conversely, when extra expertise might be needed, it is simply unavailable.，并建议按任务需要动态增删 agent。论文也观察到 agent 之间会自发代偿（去掉 Coder+Terminal 后 FileSurfer 直接读代码推算答案），说明消融降幅不等于该能力的独占价值。Agent 数量与蒸馏成本的权衡论文没有量化。
+
+#### S159 · 按角色分配不同模型（per-role model routing）
+
+- **大类/来源**：多agent协同｜[Magentic-One 论文 Table 1 与 §5.1；AutoGen GAIA 官方 scenario；Squad](https://arxiv.org/abs/2411.04468)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：不同槽位用不同模型：Magentic-One 把 o1-preview 只放在 Orchestrator 的外循环与 Coder 两个角色，其余 agent 保持 GPT-4o。GAIA test set 完成率由纯 GPT-4o 的 32.33%±5.3 提升到 38.00%±5.5（+5.67 个百分点）。官方 GAIA 评测场景同样为 4 个角色各配一个独立 model client。
+- **证据**：论文 Table 1：Magentic-One (GPT-4o) GAIA 32.33±5.3 / AssistantBench EM 11.0±4.6、accuracy 25.3±6.3 / WebArena 32.8±3.2；Magentic-One (GPT-4o, o1) GAIA 38.00±5.5 / AssistantBench EM 13.3±4.9、accuracy 27.7±6.5 / WebArena 未报。§5.1：we experiment with using OpenAI o1-preview for the outer loop of the Orchestrator and for the Coder, while other agents continue to use GPT-4o。代码侧 agbench/benchmarks/GAIA/Templates/MagenticOne/scenario.py:26-29 分别 load_component 出 orchestrator_client / coder_client / web_surfer_client / file_surfer_client 四个 client，:40/:47/:52 分派，:60 把 orchestrator_client 交给 MagenticOneGroupChat。旁证：Squad（github/bradygaster/squad）README 也写明按角色分档选模型——premium for architecture, research and review, standard for code and docs, fast for mechanical work。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 5。per-role 模型路由的论文数字与官方场景实现双双核实，是控本第一杠杆；注意增益本身在误差棒内、o1-preview 结论已过时需用当代模型复测。
+- **测试设计**：三组：①单一模型跑全部角色；②仅计划器 + 编码器用强模型，其余弱模型；③按角色三档（规划/编码=强，检索/执行=中，机械=弱）。同任务集同 seed，比较「一次通过率 × 平均单任务成本」这个乘积以及 P50 步数。
+- 备注：强模型并非处处有正收益：论文脚注 12 明确 o1 在 WebArena Gitlab 任务上拒绝完成 26%、Shopping Administration 拒绝 12%，导致该基准无法公平比较，Table 1 里 o1 变体干脆没报 WebArena 成绩；Table 1 也显示 WebArena 上 Magentic-One 落后于 WebPilot 与 Jace.AI。2024 年的 o1-preview 结论不能直接外推到 2026 年的模型。
+
+#### S171 · 合并冲突归因遥测与自消解率门禁（谁产生、谁解决、用什么策略）
+
+- **大类/来源**：多agent协同｜[How AI Coding Agents Resolve Merge Conflicts: An Empirical Study（SBES 2026，AIDev 数据集）](https://cbsoft.sbc.org.br/2026/data/papers/sbes/How%20AI%20Coding%20Agents%20Resolve%20Merge%20Conflicts%20An%20Empirical%20Study.pdf)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：首个大规模「谁解决 agent 冲突」研究：从 932,791 个 agent PR 池分析 12,299 个 AI 作者 PR 的 14,960 个冲突内部合并提交，96.1%（14,386 个，agent 自己仅 3.1%/462 个）由人类解决；agent 自消解率厂商间相差近 60 倍（Codex 0.5% → Devin 29.4%，Cursor 8.9% 居中）；Codex（90.2%）与 Claude Code（83.3%）各有 >83% 的自消解来自单一仓库〔K3 勘误：原区间 80–83% 对 Codex 偏低〕（集中度偏差）；五个 agent 的消解策略分布彼此迥异、部分与人类 statistically indistinguishable、部分 strongly divergent。
+- **⚠ 勘误（K3 对照原文，已就地改正）**：「>80–83%」应为「>83%（Codex 90.2%、Claude Code 83.3%）」，已就地改正。
+- **证据**：本次已下载 11 页 PDF 全文并抽取文本核对上述全部数字（SBES 2026，2026-09，圣保罗）。文中引用的相关量化：11.9% 的合并至少含一冲突（Ghiotto et al.）、87.9% 的冲突块符合小型语言无关目录（Boll et al.）、人工解决单个冲突最高约 40 小时（Vale et al., IEEE TSE 2022 调研+挖掘研究）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 3。大规模实证、数字基本全部吻合（一处轻微口径偏差已标注）；「自消解率=产线自主度一级指标」的用法与证据匹配。
+- **测试设计**：在 harness 内置冲突归因器（冲突制造者、解决者、策略类型 V1/V2/新码/组合），A/B 不同合并策略时以自消解率、消解正确性（合并后 CI 破坏率）、人工介入率为主要指标。
+- 备注：基于 GitHub 公开 PR 遥测，各厂商自消解率差异可能反映产品策略（强制人工 review）而非模型能力；Codex/Claude Code 的行为被单一仓库主导，跨仓库外推需谨慎。策略目录（V1 50%/V2 25%/新码 13%）可直接用作消解分类标签体系。；修正建议：建议把「>80–83%」改为「>83%（Codex 90.2%、Claude Code 83.3%）」以贴合原文。
+
+#### S172 · 冲突预测驱动的任务排程：用静态重叠特征在派单时串行化高风险任务对
+
+- **大类/来源**：多agent协同｜[Predicting Merge Conflicts in Collaborative Software Development（ESEM 2019，arXiv 1907.06274）；Predicting the Difficulty of Merge Conflicts（2020）](https://arxiv.org/abs/1907.06274)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：仅用 9 个轻量 Git 特征（改动文件/目录重叠等）预测合并是否会冲突，跨语言 safe-merge 场景 f1 达 0.95–0.97；冲突「解决难度」同样可预测：6,380 个冲突、128 个 Java 项目上 AUC 0.76。
+- **证据**：学术实证研究（Owhadi-Kareshk et al., ESEM 2019，被引 76+；Brindescu et al., 2020，数字来自论文 PDF，本次经搜索摘要核对，未逐页验证原文）。属于人类协作数据上的经典结论，agent 场景需重训验证。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 4 / 可测性 4。第一篇数字吻合且 claim 限定准确；人类协作数据到 agent 分布有偏移（条目已声明需重训），第二篇未核实故证据强度取 3。
+- **测试设计**：自研产线记录每对并行任务的文件/符号重叠特征与实际冲突结果，在线训练轻量分类器；A/B：预测器排程 vs 朴素并行 vs 全串行，比较冲突数、重试成本、端到端时延与通过率。
+- 备注：人类协作数据训练的特征对 agent 任务可能不同分布（agent 改动更机械、更集中于热点文件），必须在自产数据上重训；错峰用时延换冲突，需按任务 SLO 加权。
+
+### 3.10 harness工程（7 条，A 级 4 条）
+
+#### S031 · durable state + phase-local context + 可检查状态转移 + runbook 的 harness 规模化（StateM）
+
+- **大类/来源**：harness工程｜[StateM: Reaching 95.3% Raw Accuracy, or a $15 Frontier Run, on Terminal-Bench 2.1 via Harness Scaling (arXiv 2608.15089)](https://arxiv.org/abs/2608.15089)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：不改模型权重、只扩 harness（持久状态、阶段局部上下文、被检查的转移、可恢复 runbook、版本化实践），即可把长时程 agent 的通过率从 83.1% 提到 92.1%~95.3%，并把 API 花费从 574.68 美元降到约 15 美元〔口径注（本报告）：$574.68 为前沿模型参考运行的成本口径、约 $15 为 StateM harness 配置的成本口径，两者非同一模型配置，不能按「同配置 38 倍下降」引用〕
+- **证据**：摘要：'StateM raises GPT-5.5 xhigh to 92.1%, versus 83.1% reference and GPT-5.6 Sol Ultra at 91.9%'；'With GPT-5.6 Sol xhigh, StateM reaches 95.3% raw accuracy across 445 trials and succeeds on all 89 tasks at least once'；'less than $38 of adaptation raises DeepSeek-V4 Flash from 82.7 to 88.1% under standard timeouts'；'Final-score API usage is about $15 versus $574.68 for the GPT reference'。失败模式与策略直接对应长时程问题：'lose track of mutable state, fail to reactivate lessons from earlier executions, skip known procedures, or stop prematurely'
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 4。WebFetch 抓取 arXiv:2608.15089 摘要，92.1% vs 83.1%、95.3%/445 trials/89 tasks、$38→82.7→88.1%、$15 vs $574.68、BusinessBench held-out 0.55/1.34 全部逐字吻合；harness-only 改进且对照清晰，benchmark 定级如实，黑灯工厂可直接按对照组/实验组复测。
+- **测试设计**：对照组=现有 harness（单一累积上下文 + 自动压缩）；实验组=加 durable state/phase-local context/runbook 层的同一 harness；同模型、同任务集（Terminal-Bench 2.1 或自家大仓库集），比较通过率、每任务 token/美元与跨 run 方差
+- 备注：泛化性有限：BusinessBench 上按家族定制 runbook 的 held-out 增益仅 0.55 macro / 1.34 micro 分（只有两个'机制匹配'家族提升 10.04 分）——说明大增益部分来自任务定制而非通用机制；runbook 需人工投入（<38 美元适配成本），黑灯工厂需评估 ROI
+
+#### S047 · StuckDetector 卡死循环检测：六步窗口内识别四类重复模式并中止
+
+- **大类/来源**：harness工程｜[经典 OpenHands harness（openhands-ai 0.39.0，controller/stuck.py）](https://pypi.org/project/openhands-ai/0.39.0/)｜证据等级：none｜定级：**C**
+- **承诺改进**：内置启发式检测器在每步前检查历史：重复『同 action→同 observation』、重复『action→error』、agent 自言自语式重复 MessageAction（monologue）、以及最近六步的 action-observation 循环模式；命中即判定 agent 卡死并终止该轮，避免无上限烧 token
+- **证据**：代码取证（openhands-ai==0.39.0 wheel）：controller/stuck.py:89-102 依次调用 _is_stuck_repeating_action_observation / _is_stuck_repeating_action_error / monologue / _is_stuck_action_observation_pattern（注释 'scenario 4: action, observation pattern on the last six steps'，:73 注释 'the first few scenarios detect 3 or 4 repeated steps'）；controller/agent_controller.py:165-166 构造 StuckDetector 并入主循环。纯启发式，无公开基准数字
+- **K3 验证结论**：链接有效；claim 一致；证据强度 1 / 大型仓库价值 4 / 可测性 5。机制经 wheel 代码逐行证实，但零效果证据（无基准、无消融），按定级规则证据强度不足 2 落 C；作为熔断器工程价值高，值得在自研 harness 上自证。
+- **测试设计**：采集自研 harness 的失败轨迹标注卡死样本，对照：无检测 vs 该四模式检测 vs LLM 自评'是否在推进'；比较误杀率、平均止损步数与节省 token
+- 备注：阈值（3-4 次重复、6 步窗口）是硬编码经验值；合法的'编译-修复'循环可能被误杀，应与任务类型/错误签名结合放宽。新版 SDK 文档未见同名机制公开页面，迁移时需自行移植；修正建议：claim 改为『五类模式』或注明 0.39.0 版另有第五类 context window error loop（≥10 步窗口）；证据行号修正为 stuck.py:73/:88-108 与 agent_controller.py:166。
+
+#### S069 · 训练期联合演化 harness 工具与 hooks（HarnessAdapt-RL）
+
+- **大类/来源**：harness工程｜[HarnessAdapt-RL（arXiv 2610.28069, 2026-10）；HarnessAdapt-RL: Training the Whole Agent, Not Just the Model（arXiv 2610.28069，2026-10-20）](https://arxiv.org/abs/2610.28069)｜证据等级：benchmark｜定级：**C**
+- **承诺改进**：在 RL 训练 coding agent 时同时让一个教师模型演化 tools 与 hooks（每次改动只有在观测到 pass rate 或 trainable rate 提升且另一项不下降时才保留）：9B 基座上比 GRPO 在 SWE-bench Verified / Multilingual / Pro 上分别高 9.8 / 12.6 / 6.4 个百分点，并超过用人工设计 OpenHands harness 的 GRPO；部署时移除演化出的工具与钩子最多掉 7.7 个百分点 ｜ 〔并集·HarnessAdapt-RL(gapfill)〕在 RL 训练中同时演化策略与 harness：以 9B 基座模型计，pass@1 相对 GRPO 在 SWE-bench Verified / Multilingual / Pro 上分别 +9.8 / +12.6 / +6.4 个百分点，并超过使用人工设计 OpenHands harness 的 GRPO；机制级技能在评测时移除后收益仍存续；随策略变化持续重新演化工具与 hooks 优于冻结早期版本，但在部署时把它们移除最多损失 7.7 个百分点
+- **证据**：论文摘要原文：「With a 9B base model, HarnessAdapt-RL improves pass@1 over GRPO by 9.8, 12.6, and 6.4 percentage points on SWE-bench Verified, Multilingual, and Pro, and outperforms GRPO with the human-designed OpenHands harness」；「Re-evolving tools and hooks as the policy changes outperforms freezing early versions. Removing them at deployment, in contrast, costs up to 7.7 percentage points」；机制级 skill 在评测时移除后收益仍保持。 ｜ 〔并集·HarnessAdapt-RL(gapfill)〕本次通过 arXiv API（id_list=2610.28069）读取原文摘要核实：机制级技能由冻结教师生成，针对跨任务反复出现的交互问题由另一教师模型演化 tools 与 hooks，且每次变更只有在提升观测 pass rate 或 trainable rate 且不降低另一项时才保留。三个基准名与全部百分点数字照录摘要原文。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 3 / 可测性 2。claim 与摘要完全一致，但依赖 RL 设施且与自训模型强耦合，对调用闭源 API 的黑灯工厂只能离线借鉴，可测性低，定级 C。
+- **测试设计**：离线流程：固定一批大仓库 issue 作为「工具演化集」，用一个 meta-agent 读失败轨迹提出工具/钩子改动 → 在留出集上评测 → 只保留提升的改动；迭代 N 轮后，把演化出的 ACI 与当前人工 ACI 在留出集上做同模型 A/B。
+- 备注：成本高（需要 RL 训练设施与多轮迭代），且证据来自 9B 模型 + SWE-bench 系列；它是「离线产出新 ACI」的可行性证据，不等于可以在线自动改生产 harness；论文自述 7.7pp 的移除代价说明工具与 policy 强耦合，模型换代后需要重新演化。 ｜ 〔并集·HarnessAdapt-RL(gapfill)〕面向自训开源模型的场景，对直接调用闭源 API 的黑灯工厂只能借鉴其演化流程与安全策略，无法照搬 RL 部分。摘要未给 9B 之外规模的结果，也未给 SWE-bench Pro 上 +6.4pp 之外的分布细节。
+
+#### S120 · YAML 加可插拔 tool bundle 定义整个 harness（工具、模板、历史处理、状态命令四类可配）
+
+- **大类/来源**：harness工程｜[SWE-agent](https://swe-agent.com/latest/config/tools/)｜证据等级：none｜定级：**B**
+- **承诺改进**：把 agent-computer interface 整体外置为单个 YAML：提示词模板、命令实现文件、响应解析与历史处理、环境变量四类组件全部配置化，工具以 bundle（bin/ + config.yaml + install.sh）形式插拔，改 harness 不改代码——这是做大规模 A/B 的前提。
+- **证据**：论文 §A.3 把可配组件分为四类（prompt templates、command files、control flow、environment variables），并称 Iteratively refining the configuration file is the main way we achieved better agent performance。仓库结构核实：config/README.md 列出 default、sweagent_0_7（论文版）、benchmarks、exotic、human 等分组，Default config: anthropic_filemap.yaml；config/default.yaml 共 69 行，含 4 个模板、bundles 三条（registry、edit_anthropic、review_on_submit_m）、registry_variables、parse_function(function_calling)、history_processors(cache_control)。官方文档给出 bundle 目录规范 bundle/{bin/<tool executable>,config.yaml,install.sh,README.md,pyproject.toml}，config.yaml 每个工具声明 signature/docstring/arguments。全局状态通过 state_command（每步执行、返回 JSON、注入提示词模板）暴露，实现在 tools/windowed/bin/_state:18-21；持久化状态用文件而非环境变量的原因写在 tools/registry/lib/registry.py:8-13（subprocess 里无法设环境变量）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 5 / 可测性 5。配置化是工厂跑大规模 A/B 的本体层，存在性与用法已核实、有效果证据为零属自评如实；工程采纳价值极高但按证据规则列 B。
+- **测试设计**：工程性验收而非效果实验：定义『每个候选策略对应一个 config 覆盖层』的约定，做可复现性检查（同 config 跑 N 次轨迹哈希一致、跨机器环境一致）；随后所有效果型 A/B 都在该骨架上跑。
+- 备注：配置化本身没有官方效果数字（evidenceGrade=none）。官方 FAQ 给出选型依据：需要特定工具、想实验不同 history processors、想要强大 YAML 配置不改代码时选 SWE-agent，即它被定位为 harness 可变体实验台而非最强现役 agent。官方 README 与文档横幅已声明 SWE-agent has been superseded by mini-swe-agent ... maintenance-only mode，当实验台可以，当生产基线要谨慎。；修正建议：如需引用 §A.3 原文，建议补查论文附录页确认该引文；其余无误。
+
+#### S121 · 显式规划/通用子代理作为可选组件，且可能对仓库级生成任务有害
+
+- **大类/来源**：harness工程｜[论文《Beyond the Model: Demystifying Harness Effects in Software Engineering Agents》](https://arxiv.org/abs/2609.32459)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：在 mini-SWE-agent 与 OpenCode 两个 harness、10 个开源权重模型、SWE-bench Pro / ProgramBench / GitTaskBench 上评测后构建模块化 NanoHarness 做五个组件消融：结构化工具使用与任务专用 subagent 提升最稳定；上下文压缩与『通用 subagent』会损害仓库生成类性能；复杂 harness 随模型变强收益递减，但对强模型在开放式仓库级任务上仍有收益。
+- **证据**：消融 + 基准证据，摘要：'Component-level analysis on ProgramBench further shows that structured tool use and task-specific subagents provide the most stable improvements, while context compression and general subagents can hurt repository-generation performance.'；整体 NanoHarness 相对 mini-SWE-agent 在 Qwen3.7-Max 与 DeepSeek-V4-Pro 上分别 +7.37 与 +6.21 个百分点。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 4。arXiv 2609.32459 摘要逐字核对通过：mini-SWE-agent/OpenCode × 10 个开源权重模型 × SWE-bench Pro/ProgramBench/GitTaskBench、NanoHarness 五组件消融、引句「structured tool use and task-specific subagents... general subagents can hurt repository-generation performance」与 +7.37/+6.21pp 全部吻合；消融级证据，无夸大。
+- **测试设计**：对照：自研 harness 当前形态；实验：分别打开/关闭『显式规划』与『通用 subagent』两个开关，在 SWE-bench Pro + 仓库生成类任务上做 matched 比较，观察 resolve rate 与成本。
+- 备注：被评估模型为 Qwen/DeepSeek 两个开源权重家族，结论外推到闭源前沿模型需自行复验；与 2609.20804 结论互相呼应（组件收益高度模型/任务相关）。
+
+#### S130 · harness 版本级回归防护：把 harness 当作需要持续回归测试的一等组件
+
+- **大类/来源**：harness工程｜[Don't Blame the Large Language Model: How Agent Harness Evolution Shapes Coding Agent Quality (arXiv 2607.03691)](https://arxiv.org/abs/2607.03691)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：固定底层 LLM、只变 harness 版本，35 个连续 release 的 resolve rate 在 23.0%–39.0% 间大幅波动、均值 30.5%，与版本序无显著趋势（Spearman ρ=0.208, p=0.231）；同期 token 消耗从 391K 涨到 668K/题（+70%）却没有换来任何正确率提升。
+- **证据**：对象：Qwen Code CLI 的 35 个连续 release；每版在 50 道分层 SWE-bench Verified 任务上跑两遍，87.7% 任务两次结果完全一致（resolve rate Wilcoxon p=0.478、token p=0.432、tool calls p=0.466），确认波动来自 harness 改动而非采样噪声。resolve rate 均值 30.5%，最低 23.0%、最高 39.0%（v0.0.14）；补丁产出率 52%–94% 但正确率仅 23%–39%。token 消耗 Spearman ρ=0.743 (p<0.0001)，前 9 版约 391K/题、最近约 668K/题（+70%），最新版相对 per-task 基线最多高 19.6%。失败任务比成功任务多耗 2.7× token、多发 1.8× tool call（成功 7.2 次调用/258.7K token vs 失败 12.95 次/697.7K token）。具体案例：v0.4.1→v0.5.0 因改 OpenAI converter（PR #1235，+346/−8 行）resolve rate 从 39.4% 掉到 32.5%，token 仍高企 561K；Provider 层大幅改动的 release 效果显著退化（DE2 ρ=−0.336）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 5。claim 全部数字经全文核验通过：35 个 release、23.0%–39.0%/均值 30.5%、Spearman ρ=0.208 p=0.231、391K→668K（+70%，ρ=0.743 p<0.0001）、87.7% 两次运行一致、Wilcoxon p=0.478/0.432/0.466、失败任务 2.7× token/1.8× 调用（7.2 次/258.7K vs 12.95 次/697.7K）、PR #1235 案例 39.4%→32.5%；harness 回归防护证据扎实。
+- **测试设计**：每次改动都跑固定回归集（同一批大仓库任务 + 固定模型 + 固定 seed），同时报 resolved 率与 token/题两条曲线，任一劣化超过阈值即阻断发布。
+- 备注：重要负面证据：这些回归没有任何现有自动化测试能捕获（论文称项目缺少 non-functional agentic regression testing），且在仓库内缺少这类测试时回归会被误判成模型问题——这正是「别怪大模型」的论点。样本仅 50 题、只覆盖 Qwen Code CLI 一个 harness 家族。
+
+#### S131 · 把 harness 本身当作可自动进化的对象：闭环节自动演化 harness（工具/中间件/长期记忆组件化）
+
+- **大类/来源**：harness工程｜[Agentic Harness Engineering (AHE): Observability-Driven Automatic Evolution of Coding-Agent Harnesses (arXiv 2604.25850)](https://arxiv.org/abs/2604.25850)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：十轮 AHE 迭代把 Terminal-Bench 2（89 题）的 pass@1 从 69.7% 提到 77.0%，超过人写 harness（Codex 71.9%、Terminus-2 62.9%、OpenCode 47.2%）；冻结后换模型仍能迁移（+5.1 至 +10.1pp 跨三个模型家族）。
+- **证据**：Table 1（TB2 全 89 题 pass@1）：人写 harness OpenCode 47.2% / Terminus-2 62.9% / Codex 71.9%；自演化 NexAU0=69.7% / ACE=68.9% / TF-GRPO=72.3% / AHE=77.0%（难度分档 Easy 100.0%、Med 88.2%、Hard 53.3%，Hard 档略低于 Codex 的 56.7%）。演化约 32 小时完成十轮。迁移性：TB2 上 deepseek-v4-flash +10.1pp、qwen-3.6-plus +6.3pp、gemini-3.1-flash-lite-preview +5.1pp。SWE-bench Verified 上以少 12% token 达到最高 aggregate success。Table 3 组件消融（从 NexAU0 种子单组件替换）：+memory only=75.3%、+tool only=73.0%、+middleware only=71.9%、+system_prompt only=67.4%（低于种子 69.7%）、AHE full=77.0%。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 3。全文逐格确认：TB2 共 89 题（4 easy/55 med/30 hard）、OpenCode 47.2/Terminus-2 62.9/Codex 71.9/NexAU0 69.7/ACE 68.9/TF-GRPO 72.3/AHE 77.0、十轮约 32 小时、迁移 +10.1/+6.3/+5.1pp、消融 75.3/73.0/71.9/67.4（唯一下降）vs 种子 69.7，全部精确吻合；testability 3 分因自动演化闭环实施成本高。
+- **测试设计**：把自研 harness 拆成工具/中间件/记忆/提示四层，在固定 seed 上跑 10 轮带评测反馈的自动演化，基线是当前手工 harness；同时做「冻结后换模型家族」的迁移实验与「单组件替换」消融。
+- 备注：负面证据同样重要：只换系统提示词（+system_prompt only）反而比种子差 2.3pp，说明「把策略写进 prompt」不如「把能力写进工具/记忆结构」；单组件收益可能超过全量组合；Hard 长程档上 AHE 仍不及 Codex。
+
+### 3.11 评测方法论与成本（26 条，A 级 19 条）
+
+#### S017 · 压缩策略必须按「成功率/延迟/成本」三指标评估，token 少 ≠ 更快更便宜（重要负面结果）
+
+- **大类/来源**：评测方法论｜[Beyond Token Savings: A Systematic Study of Context Compression in LLM Agents (arXiv:2609.32961)](https://arxiv.org/abs/2609.32961)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：现有 agent harness 把「压什么、何时压、压多少」捆成固定策略；系统拆解这些决策后发现：更少的 token 未必意味着更快或更便宜，压缩必须按任务、模型与负载定制并用执行侧指标评估
+- **证据**：3 个开源权重模型 × SWE-bench Verified 与 Terminal-Bench 1.0，近 35,000 次 agent run，测任务成功率、token 用量、端到端延迟与估算成本。Terminal-Bench 上用 Qwen 时，约 1/3 token 的策略可能比未压缩 agent 慢 20–80%；成功率相近的策略解决的是不同任务；同一策略在不同模型上表现差异明显
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 5。大规模系统性负面结果，直接约束『省 token = 省钱』假设；压缩策略网格 A/B + 延迟否决条件应作为产线评测标配。
+- **测试设计**：把压缩策略做成可配置因子（开关/比例/时机）做网格 A/B，同时记录 solve rate、wall-clock、token 与 $/task；把「token 下降但延迟上升」设为否决条件
+- 备注：这是对「省 token = 省钱」假设的直接反例，对自研 harness 的成本模型有约束力；论文未针对代码仓库场景，结论需在本任务域复验
+
+#### S036 · 用 METR 时域（50% 可完成人类时长）给并行 agent 设定任务切分粒度与可交付上限
+
+- **大类/来源**：评测方法论｜[Measuring AI Ability to Complete Long Software Tasks (METR，arXiv 2503.14499)；METR: Measuring AI Ability to Complete Long Software Tasks (2025-03)](https://arxiv.org/abs/2503.14499)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：以'人类专家完成时长'为刻度的 50% 时域可量化 agent 能可靠做多长的任务：该时域自 2019 年起约每 7 个月翻倍；Claude 3.7 Sonnet 约 50 分钟（论文摘要口径；官方博客口径约 1 小时——两数出自不同版本页面，引用须注明出处、勿混用）。可据此切分并行任务粒度与设定'单个 agent 一个 session'的时长上限 ｜ 〔并集·METR time horizon(D分片)〕用「模型能以 50% 成功率完成的人类耗时长度的任务」定义时间地平线：2025 年初 Claude 3.7 Sonnet 约 1 小时；模型在 <4 分钟任务上接近 100%、>4 小时任务上 <10%；过去 6 年地平线约每 7 个月翻倍，而在 SWE-bench Verified 上推算的翻倍速度快于 3 个月。
+- **证据**：论文摘要：'frontier AI time horizon has been doubling approximately every seven months since 2019'；'Claude 3.7 Sonnet have a 50% time horizon of around 50 minutes'；'current models have almost 100% success rate on tasks taking humans less than 4 minutes, but succeed <10% of the time on tasks taking more than around 4 hours'。配套数据页 https://metr.org/time-horizons （最后更新 2026-09-08，注明'不再主动更新'），并注明 'Measurements above 16 hrs are unreliable with our current task suite' ｜ 〔并集·METR time horizon(D分片)〕METR 用约 50 个带人工基线耗时的真实软件任务拟合「成功率-任务时长」logistic 曲线，给出 50%/80% 成功率对应的地平线指标及其指数外推趋势；SWE-bench Verified 作为附证数据集（人工耗时用估计值而非实测基线）复现同一指数趋势。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 3。核心数字（7 个月翻倍、50 分钟、70 天）分别经 arXiv 摘要、论文 §4.1、官方博客三处核实吻合，论文为 NeurIPS 2025 收录；仅一句引文的出处标注有版本漂移，数字本身属实；作任务切分刻度价值高，但自家任务的人工耗时标定成本不低，testability=3。
+- **测试设计**：用自家任务集先标定'人类专家完成时长'（或用 METR 的 HCAST/RE-Bench 任务做代理），把任务按时长分桶，比较不同切分粒度下各桶的通过率，检验'超过时域即失败'的预测力
+- 备注：时域是'低先验新人在无背景情况下能做的事'的量度，论文强调真实工作依赖既往上下文（熟悉仓库的工程师快得多），因此该刻度不能直接当真实大仓库工时；METR 数据页已停止更新，16 小时以上测量不可靠；SWE-Bench Verified 子集上翻倍更快（<3 个月），说明口径敏感 ｜ 〔并集·METR time horizon(D分片)〕人工耗时是估计值（Verified 上尤甚），绝对数值有误差但趋势稳健；拟合曲线需要每桶足够样本量；该指标反映模型 + harness 联合能力，单独归因 harness 需配合中性基线。；修正建议：把 'almost 100% success rate on tasks taking humans less than 4 minutes…' 的出处从'论文摘要'改为'METR 官方博客（2025-03-19，论文 v1 摘要口径；arXiv v4 摘要已改用 o3≈110 分钟表述）'。
+
+#### S037 · A/B 主战场选长时域终端基准（Terminal-Bench 2.0 / Long-Horizon-TB），并做多阶段持续评测而非单次通过率
+
+- **大类/来源**：评测方法论｜[Terminal-Bench 2.0（89 tasks，arXiv 2601.11868）与 Long-Horizon-Terminal-Bench（46 长时域任务，arXiv 2607.08964）](https://arxiv.org/abs/2607.08964)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：长时程 harness 改进需要在'需要数百个 episode、分钟到小时级执行'的基准上验证：LHTB 上 agent 平均每任务消耗 990 万 token、约 231 个 episode、85.3 分钟执行时间，最强模型 pass@1 也仅 15.2%（部分奖励阈值 0.95），均值仅 4.3%
+- **证据**：LHTB 摘要：'agents consume on average 9.9M tokens per task, with roughly 231 episodes and 85.3 minutes of execution time per run'；'Even the strongest tested model achieves 15.2% pass@1 at a partial-reward threshold of 0.95 and 10.9% at a perfect-reward threshold of 1.0, while the mean pass rate across models is 4.3% and 1.7%'；46 个任务、9 个类别、细粒度子任务打分（dense reward）。Terminal-Bench 2.0（arXiv 2601.11868）含 89 个硬任务，'frontier models and agents score less than 65%'
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 4。LHTB（arXiv:2607.08964）摘要逐字吻合：46 任务 9 类、9.9M token/任务、231 episodes、85.3 分钟、最强 15.2%@0.95/10.9%@1.0、均值 4.3%/1.7%；Terminal-Bench 2.0（arXiv:2601.11868）89 任务与 <65% 吻合；notes 两处次级引用亦独立复核吻合（2609.26826：1,081 PR/639 任务/28,801 次/$105,933；2607.14004：RELAI-VCL 76.4% vs GEPA 66.0% vs Meta Harness 64.6% vs 基线 58.7%，GEPA 迁移低于基线、回归控制内置才复利）。选长时域基准做 A/B 主战场的定位准确。
+- **测试设计**：以 LHTB/Terminal-Bench 2.0 子集做每轮 A/B（同一模型、同一预算、同 seed 多次重复），主指标用 pass@1 + 部分奖励 + token 成本 + 跨 run 方差
+- 备注：负面/方法论提醒：另一篇评测研究指出终端基准存在'假难度'（缺上下文、参考解损坏、基础设施失败、可绕过的验证器），全零通过率不等于真实能力差距（arXiv 2609.26826，用 1,081 PR / 639 评分任务 / 28,801 次试验 / 10.6 万美元做审计）。另需注意 harness 优化收益不复利：Terminal-Bench 2.0 上二次优化时，GEPA 的优化后 agent 迁移到新任务时低于未优化基线，RELAI-VCL 76.4% vs GEPA 66.0%、Meta Harness 64.6%、基线 58.7%，且只有把回归控制内置进优化循环的方案才复利（arXiv 2607.14004）
+
+#### S058 · 以真实 MCP 服务器基准（MCP-Universe）验收长程工具使用，警惕商用 agent 封装无增益
+
+- **大类/来源**：评测方法论｜[MCP-Universe: Benchmarking LLMs with Real-World MCP Servers (Luo et al., Salesforce AI Research, 2025)](https://arxiv.org/abs/2508.14704)｜证据等级：benchmark｜定级：**B**
+- **承诺改进**：6 个领域 11 个真实 MCP server（含仓库管理与网页搜索）：GPT-5 成功率仅 43.72%，Grok-4 33.33%，Claude-4.0-Sonnet 29.44%；输入 token 随交互步数快速增长构成长上下文挑战；论文发现企业级 agent（Cursor）表现并不优于标准 ReAct 框架。
+- **证据**：公开基准成绩（2025-08，引用 114+）；项目页 mcp-universe.github.io，代码 SalesforceAIResearch/MCP-Universe。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 3 / 可测性 3。数字精确且『Cursor 不优于 ReAct』反面结论有产线决策价值，但基准含非 coding 域、搬运成本中等，定 B。
+- **测试设计**：复用其仓库管理域任务作为工具接入层固定验收集，对比自研编排与通用 ReAct 基线的成功率与 token 曲线。
+- 备注：领域含定位导航/3D 设计等非 coding 任务；成功率低部分源于长上下文累积，结论需与内部真实任务集交叉验证。
+
+#### S067 · 用失败模式聚类（而非总分）驱动工具改进：把「工具使用错误」和「语法错」从其他失败里单独拆出来
+
+- **大类/来源**：评测方法论｜[SWE-Bench Pro（arXiv 2509.16941, 2025-09）§6.3 Trajectory Failure Modes, Table 4](https://arxiv.org/abs/2509.16941)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：在 41 个真实企业级仓库、1865 个长程任务上，GPT-5 判官对未解决轨迹做失败模式聚类：Tool-Use 类失败 Gemini 2.5 Pro 38.8%、Qwen3-32B 42.0%、GPT-4o 100%（其失败里全是工具错误）；Syntax error 占 Opus 4.1 失败 24.2%、Gemini 2.5 30.5%；Long context 占 Sonnet 4 失败 35.6%，「无休止读文件」占 17.0%
+- **证据**：论文 Table 4（Submitted/Not-Submitted 分列，括号为实例数）：Claude Opus 4.1 Wrong Solution 35.9%、Syntax Error 24.2%；GPT-5(high) Tool-Use 17.7%；Claude Sonnet 4 Long Context 35.6%、Stuck in Loop 33.9%；Gemini 2.5 Pro Tool-Use 38.8%、Syntax Error 30.5%；Qwen3 32B Tool-Use 42.0%、Syntax Error 48.7%、Instruction Following 19.7%。评测用 GPT-5 作判官，判官与人工分类的一致性引用 Yang et al. 的 87% 对齐率。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 4 / 可测性 4。数字与论文正文一致（表格口径差异已标注），失败模式归因方法论对大仓库产线排改进优先级直接可用，定级 A。
+- **测试设计**：在自研 harness 的每条轨迹上跑同样的失败模式判官（可用同款 LLM-as-judge 提示词），按工具维度归因；然后对占比最高的失败模式（预期是 Tool-Use / 语法错）逐个做定向 A/B 修复，用归因分布的迁移作为主指标而不是只看总分。
+- 备注：反面证据/边界：判官打分本身有噪声（引用他人 87% 人工对齐率而非自证 100%），不同模型失败模式差异极大（GPT-5 的 Tool-Use 仅 17.7% 而 GPT-4o 是 100%），因此「优化工具」不能照抄别人结论，要按自研 harness 上自己的分布来排优先级；该 benchmark 本身还指出长程任务常需跨多文件大改，与我们场景吻合。；修正建议：把来源标注从「§6.3, Table 4」改为「§6.3 正文（失败模式按全部失败轨迹计）」，或同时给出 Table 4 两列口径；引用时注明与 Table 4 分列数字不可直接比。
+
+#### S076 · SWE-bench 数据质量审计：解法泄漏、弱测试与知识截止污染（SWE-Bench+）
+
+- **大类/来源**：评测方法论｜[SWE-Bench+: Enhanced Coding Benchmark for LLMs (Aleithan et al., 2024)；SWE-Bench+: An Enhanced Coding Benchmark for LLMs（arXiv 2410.06992）与 DeepSWE(2026)；SWE-Bench+（Aleithan et al., 2024）](https://arxiv.org/abs/2410.06992)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：原版 SWE-bench 中 32.67% 的『成功』patch 靠 issue 文本直接泄露答案作弊，31.08% 的通过 patch 因测试太弱而可疑；过滤后 SWE-Agent+GPT-4 解决率从 12.47% 跌至 3.97%；94% 以上 issue 早于模型知识截止日 ｜ 〔并集·SWE-Bench+ 审计(C分片,含DeepSWE)〕SWE-bench（含 Lite 与 Verified）有系统性数据质量问题：SWE-Agent+GPT-4 成功补丁中 32.67% 属 solution leakage（解法写在 issue 或评论里）、31.08% 因测试太弱可疑；过滤后解决率 12.47%→3.97%；>94% 的 issue 创建于模型知识截止之前。替代方案 DeepSWE：113 个新写长程任务、91 仓库、5 种语言，每次 trial 除功能验证外还跑仓库既有回归测试，实现功能但破坏无关行为即判失败。 ｜ 〔并集·SWE-Bench+(D分片)〕SWE-bench（2,294 题）中 32.67% 的成功补丁靠 issue 正文/评论里直接给出的解法「作弊」，31.08% 的通过补丁是弱测试放行的可疑补丁；>94% 的 issue 早于主流模型知识截止日；剔除问题任务后 SWE-Agent+GPT-4 解决率从 12.47% 跌至 3.97%。
+- **证据**：论文摘要（已核对原文）："32.67% of the successful patches involve cheating as the solutions were directly provided"、"31.08% of the passed patches are suspicious patches due to weak test cases"、"dropped from 12.47% to 3.97%"、">94% of issues predate LLM knowledge cutoff dates" ｜ 〔并集·SWE-Bench+ 审计(C分片,含DeepSWE)〕SWE-Bench+（arXiv:2410.06992）人工筛查：32.67% leakage、31.08% weak-test、12.47%→3.97%（该 12.47% 与 SWE-agent 论文 Table 1 的 286/2294 一致，可交叉验证）；>94% issue 早于知识截止日。佐证：arXiv 2506.12286《The SWE-Bench Illusion》报告模型仅凭 issue 文本即可达最高 76% 的出错文件路径识别率（不在 SWE-bench 仓库上只有 53%），逐字 5-gram 复现率 35% vs 其他基准 18%。DeepSWE（deepswe.datacurve.ai/blog/deepswe，2026）：任务全部新写（no model has seen the solution during pretraining），准入含 prompt-verifier 双射、验收广度、真实感、环境洁净四项人工复核；区分度：8 个前沿模型分数跨度 70%，公开 SWE-Bench Pro 仅 30%。 ｜ 〔并集·SWE-Bench+(D分片)〕论文对 SWE-bench 全量 2,294 题人工筛查：成功补丁中 32.67% 存在解法泄漏、31.08% 为弱测试可疑通过；过滤后 SWE-Agent+GPT-4 12.47% → 3.97%；该质量问题在 Lite 与 Verified 子集中同样存在。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 4。数字与来源逐字吻合的系统性好审计（arXiv 预印本+独立复现佐证），对自研产线的评测信号可信度治理直接可落地，仅 notes 有两处小出处需修正。
+- **测试设计**：对自建任务集做同等审计：随机抽检解决案例是否接触过答案/测试文件，统计『改测试文件』『空 patch 通过』比例；用去泄漏子集复测各策略排名是否翻转
+- 备注：提醒：执行反馈既是解药也是被 hack 的对象——允许 agent 自写测试自证会复现同类作弊；SWE-bench Verified（OpenAI 人工过滤 500 例）与后续动态基准均为缓解手段 ｜ 〔并集·SWE-Bench+ 审计(C分片,含DeepSWE)〕SWE-Bench+ 结论针对 2024 年 SWE-Agent+GPT-4 的成功案例，属单点研究，未必同等适用于当代模型与 Verified 子集之外的题目；但『越强的模型越会钻固定测试空子』被 TestJack（34.4%）独立复现，评测器审计必须常态化。DeepSWE 基准 2026 年才发布（v1.1 于 2026 年 6 月），规模仅 113 题，置信区间约 ±1% 到 ±6%，判定小幅 harness 差异会功效不足。SWE-bench 原始论文（arXiv 2310.06770）评测定义：所有 FAIL_TO_PASS 与 PASS_TO_PASS 全部通过才算解决。 ｜ 〔并集·SWE-Bench+(D分片)〕审计后绝对分数会大幅下跌（-8.5pp），需提前管理预期；人工筛查成本高，应自动流水线化；OpenAI 2026-10 的审计进一步证实该问题在 Verified 上持续恶化。；修正建议：notes 中 'DeepSWE 基准 2026 年才发布（v1.1 于 2026 年 6 月）' 改为 'DeepSWE 博文发布于 2026-05-26，页面链接 Latest: v1.1（具体日期未标注）'；删除或给出 'OpenAI 2026-10 的审计' 的具体出处。
+
+#### S079 · Benchmark 方法论包：两段式计分 + 格式符合率 + 失败遥测 + 难度校准选题 + API 非确定性重复测量
+
+- **大类/来源**：评测方法论｜[aider](https://aider.chat/docs/leaderboards/)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：aider leaderboard 的可迁移方法论：(1) 每条目同时报 pass_rate_1/pass_rate_2（首过率/重试后率）与 percent_cases_well_formed（格式符合率）；(2) 遥测 error_outputs、num_malformed_responses、syntax_errors、indentation_errors、lazy_comments、exhausted_context_windows、test_timeouts、seconds_per_case、total_cost；(3) polyglot 基准用 7 个模型集合筛出「≤3 个模型能解」的 225/697 题，反饱和设计；(4) temp=0 下 API 仍有 5-10 种回复变体，需 10 次重复测方差。
+- **证据**：本地抓取核对：benchmark.py:486-526 遥测字段聚合、:846-852 lazy_comments 正则（^+#... ...）、README.md 要求 docker 内执行（LLM 代码无监督运行）；polyglot.md:102-148 七模型筛选表（258 题全员解出被排除、66 题无人解出、取 ≤3 人解出的 225 题，6 语言分布 C++26/Go39/Java47/JS49/Python34/Rust30）与动机（旧基准 84.2% 逼近饱和，每破纪录仅多解 1-2 题）；benchmarks.md:307-350「OpenAI API 在 temp=0 非确定，同请求 5-10 种变体」，133 题×10 次给出误差棒；notes.md 定义两个核心指标。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 4 / 可测性 5。方法论各要点分别经官方页面核实属实（数字全对），可直接固化为自研评测台规范；仅来源链接需补全、一处措辞略需对齐原文。
+- **测试设计**：把该方法论固化为自研评测台：任何 harness 改动跑 ≥3 重复×同一任务集，报告 p1/p2、well-formed%、错误类型直方图与成本时延，替代单次运行对比
+- 备注：polyglot 已现饱和迹象（gpt-5(high)=88.0%，2025-08 数据），难度校准需要周期性重做；aider 自己声明 pricing 为 best-effort 可能过时；leaderboard 各条目未标重复次数，单次方差未全部公开；修正建议：link 字段建议补充 https://aider.chat/2024/12/21/polyglot.html 与 https://aider.chat/docs/benchmarks.html 作为联合来源；'API 仍有 5-10 种回复变体' 改为 'API 仍会产生多种回复变体（原文：usually less than 5-10 variations）'。
+
+#### S122 · 评测有效性本身会让 A/B 结论失真：基准记忆污染 + agent 极少能自己发现首个错误
+
+- **大类/来源**：评测方法论｜[Does SWE-Bench-Verified Test Agent Ability or Model Memory?（并以 DeepSWE、RepoMirage、Traverse 交叉佐证）](https://arxiv.org/abs/2512.10218)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：主流仓库基准上的『反思/检索改进』分数提升可能部分来自模型记住了标准修复；且 agent 极少能自己发现首个错误，六个前沿 judge 也不行。
+- **证据**：2512.10218：只给 issue 文本找相关文件，模型在 SWE-bench Verified 上比在 BeetleBox、SWE-rebench 上好 3 倍；给 issue 文本 + 文件路径时，找被编辑过的文件好 6 倍——作者据此认为该基准可能已被训练数据覆盖。交叉佐证：Traverse（arXiv 2609.17930）分析 2518 条近真实部署的 agent 轨迹、把 6967 个错误归为 78 类，发现首个错误之后 agent 常常恢复不了、也极少自己抓到，轨迹仍『看起来正确』；六个前沿 judge 连首个错误都定位不到（不到 1/3 的 run），专门训练的 4B verifier 明显更好，用作测试时挑选候选 run 可把成功率提到 agent 单次尝试之上。DeepSWE（arXiv 2607.07946）另用 113 个原创长程任务、91 个仓库、5 种语言替代继承测试，人工 verifier 与独立 LLM judge 的分歧比 SWE-bench Pro 低一个数量级（1.4% vs 32.4%）。RepoMirage（arXiv 2605.26177）显示把仓库结构扰动后 agent 平均表现从 66.8% 掉到 25.3%。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 4。主来源 2512.10218 的 3x/6x 数字与『可能被训练数据覆盖』结论均被摘要支持；Traverse（2518 轨迹/6967 错误/78 类/judge 不到 1/3 定位首个错误/4B verifier）、DeepSWE（113 任务/91 仓库/5 语言/1.4% vs 32.4%）、RepoMirage（66.8%→25.3%，注意该数字特指 RepoMirage-Extend 任务）三条交叉佐证均独立核实通过。
+- **测试设计**：每轮 A/B 同时报三个数：SWE-bench Verified 分数、自造或扰动版分数、以及『agent 能否自行定位首个错误』（由独立 verifier 标注）；任一指标下滑即判为过拟合信号并停止扩量。
+- 备注：2512.10218 的核心结论是『可能』，作者用跨基准落差作间接证据而非直接审计训练数据；Traverse 的 4B verifier 需自行训练复现；RepoMirage 与 Schrödinger's Code Repository（arXiv 2609.27891，抹掉仓库线索后性能一致下降、交互成本上升）可作为同一现象的独立复现来源。
+
+#### S123 · TestJack 式自适应评测器：给每个 trial 事后生成『针对性测试』再复判，把固定测试集的评测变成滚动评测
+
+- **大类/来源**：评测方法论｜[TestJack: Should you trust the results in coding benchmarks? Agentic Coding Benchmarks Auditing via Evaluator Evolution（arXiv 2610.10619）](https://arxiv.org/abs/2610.10619)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：现有代码基准几乎都只认『通过固定单测』，测试往往只覆盖任务要求的一部分，agent 因此可以 reward-hack 固定评测器而真实能力不涨。TestJack 对每个 trial 生成针对『patch 可能违反的 prompt 要求』的测试，只保留能被 ground-truth patch 接受的测试，再复审原判定：约 34.4% 被判定为正确的模型 trial 实际违反任务要求，整体解决率从 50.6% 降到 33.2%。
+- **证据**：arXiv 摘要原文（读取 abs 页确认）：6 个前沿模型后端 × 5 个基准（含 DeepSWE、SWE Marathon），约 34.4% 被判正确的 trial 实际违反任务要求；整体解决率 50.6%→33.2%。作者结论：随着 LLM 更善于针对固定评测器优化，评测器本身必须变得更自适应。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 3。arXiv 2610.10619 摘要逐项吻合：34.4% 被判正确的 trial 实际违规、解决率 50.6%→33.2%、6 前沿模型后端 × 5 基准（含 DeepSWE、SWE Marathon）、只保留被 ground-truth patch 接受的测试；testability 给 3 分因每 trial 生成并执行新测试成本不低（论文有轻量抽样版）。
+- **测试设计**：对照组：固定 FAIL_TO_PASS 判定为通过；实验组：叠加 TestJack 式针对性测试复判（保留 ground-truth patch 接受的测试）；比两者的『真实正确率』差异，以及 agent 侧要达成的目标分数（避免用被 hack 的分数选优）。
+- 备注：成本不低：每个 trial 都要生成并执行新测试（论文给轻量版：只深审随机抽样 trial，产出的测试复用于同任务所有 trial）。34.4% 是『被判对但违规』而非『全错』，说明固定测试集会系统性高估 agent 能力——任何用 SWE-bench Verified 绝对分数做的对比都要打折扣。
+
+#### S125 · 用「同模型、不同 harness」的公开榜单做 harness 杠杆量化：harness 选择的分差与一代模型差距同量级
+
+- **大类/来源**：评测方法论｜[SWE-bench 官方 Leaderboard（页面内嵌 leaderboard-data JSON，含 agent / model / resolved / cost 字段）](https://www.swebench.com/)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：固定同一个模型、只换 harness，SWE-bench Verified 的 resolved 率差可达 9.6–29.8 个百分点；固定 harness（mini-SWE-agent）换模型的跨度是 67.8 个百分点，说明 harness 是模型代差量级以下的第二杠杆。
+- **证据**：从 https://www.swebench.com/ 的 leaderboard-data 解析 Verified 榜单 180 条记录。同模型跨 harness：Claude 3.5 Sonnet 下 11 个 agent 从 SWE-agent=33.6 到 AgentScope=63.4（29.8pp）；Claude 4 Sonnet 下 8 个 agent 从 mini-SWE-agent=64.93 到 EPAM AI/Run=76.8（11.9pp）；GPT-4o 下 7 个 agent 从 SWE-agent=23.2 到 Agentless-1.5=38.8（15.6pp）；o4-mini 下 mini-SWE-agent=45.0 vs PatchPilot-v1.1=64.6（19.6pp）；Kimi K2 Instruct 下 mini-SWE-agent=43.8 vs CodeSweep-SWE-agent=53.4（9.6pp）。同 harness 跨模型（mini-SWE-agent 固定 47 条）：Qwen2.5-Coder-32B=9.0 → Claude 4.5 Opus=76.8（67.8pp）；相邻代 Claude 3.7 Sonnet=52.8 → Claude 4=64.93 → 4.5 Sonnet=71.4；GPT 5 mini=59.8 → GPT 5=65.0 → 5.1=66.0 → 5.2=72.8。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 3 / 大型仓库价值 4 / 可测性 4。从内嵌 JSON（Verified 共 180 条，与 claim 一致）逐一复算：Claude 3.5 Sonnet 11 条 33.6→63.4（29.8pp）、Claude 4 Sonnet 8 条 64.93→76.8（11.9pp）、GPT-4o 7 条 23.2→38.8（15.6pp）、o4-mini 45.0 vs 64.6（19.6pp）、Kimi K2 Instruct 43.8 vs 53.4（9.6pp）；mini-SWE-agent 固定 47 条，9.0→76.8（67.8pp），52.8→64.93→71.4 与 59.8→65.0→66.0→72.8 全部精确命中；数字零偏差，但证据强度受社区榜单性质限制。
+- **测试设计**：自研 harness 在同一批大型仓库任务上与 2–3 个公开 harness（mini-SWE-agent、OpenHands、自研简化版）做同模型配对跑，报告 resolved 率、token/题、成本三列并与榜单同款口径对齐。
+- 备注：榜单是社区提交，同一模型标签下 reasoning effort / 提示词 / 尝试次数未必一致，跨条目比较是近似因果；榜单存在已知数据污染与多次尝试混合。严格受控证据见 2607.22585 / 2606.12344 / 2609.11987 三篇。
+
+#### S126 · 控制实验量化 harness 效应：固定模型跨 harness 对比（Scaffold Effect）
+
+- **大类/来源**：评测方法论｜[The Scaffold Effect in Coding Agents: Harness Choice as a Hidden Variable in Coding-Agent Evaluation (arXiv 2607.22585)；The Scaffold Effect in Coding Agents: Harness Choice as a Hidden Variable in Coding-Agent Evaluation（arXiv 2607.22585, 2026-06-08）](https://arxiv.org/abs/2607.22585)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：同一模型在不同 harness 下 pass rate 差异仅 0–8pp（多数在 bootstrap 噪声内），但每解决一题的 token 数相差最多 40 倍；失败指纹跨模型可复现，说明 harness 带来的是稳定的成本/监督负担差异。 ｜ 〔并集·Scaffold Effect(gapfill)〕在 Terminal-Bench Pro 的 50 任务分层子集上，用 Goose / OpenCode / OpenHands-SDK 三个开源 harness 跑 Qwen 3.6 Plus 与 MiniMax M2.5：harness 选择在「每解决一个任务的 token 数」上造成最多 40 倍差异，而配对后的模型间 pass rate 差异只有 0–8 个百分点（95% 配对任务 bootstrap CI 除最大差外都含 0）。结论是「模型名 alone 是不完整的比较单元」，应按 token/延迟预算挑 harness-model 配对。
+- **证据**：Terminal-Bench Pro 分层 50 题子集，模型固定 Qwen 3.6 Plus 与 MiniMax M2.5，harness 为 Goose / OpenCode / OpenHands-SDK。Table 3 tokens-per-solved-task：Goose/Qwen=28,142、Goose/MiniMax=36,950、OpenHands/Qwen=841,201、OpenHands/MiniMax=843,286、OpenCode/Qwen=1,147,740、OpenCode/MiniMax=1,546,977（OpenCode≈Goose 的 40×）。Goose 95% CI 上界（40–61K）远低于 OpenCode 下界（733K–1.01M）。pass rate：同模型内 harness 跨度 2–8pp，同 harness 内跨模型 4–10pp；pairwise 最大 −8.0pp（Goose vs OpenCode on MiniMax，CI [−18.0, 0.0]）。平均轮次 21–27(OpenCode) vs 18–25(Goose)，仅 ~1.2×，故 40× token 差主要来自每轮上下文增长而非轮数。Figure 2：OpenCode 平均 no-action turn 比 Goose 多 10×（2.00 vs 0.20）。失败分类 6 类（REASON/VERIFY/TIME/MAX_TURNS/HANG/ERROR）跨模型可复现。 ｜ 〔并集·Scaffold Effect(gapfill)〕论文摘要给出 40x token 差、0–8pp pass rate 差与 CI 说明；失败指纹跨模型复现（Goose=REASON、OpenHands-SDK=VERIFY/MAX_TURNS、OpenCode=idle-loop/TIME），说明是 harness 级偏置而非模型级；论文公开了匿名化配置、原始 trial 日志、聚合快照与分析脚本。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 4。摘要确认 40× token 差、0–8pp pass rate 差、CI 结论与失败指纹复现；全文 HTML 进一步逐格确认 Table 3 六个 token 数（28,142/36,950/841,201/843,286/1,147,740/1,546,977）、同模型 2–8pp/同 harness 4–10pp、最大 −8.0pp CI [−18.0,0.0]、轮次 21–27 vs 18–25、no-action turn 2.00 vs 0.20（10×），全部吻合。
+- **测试设计**：在自有 harness 上做同模型多 harness 交叉跑，指标定为 tokens-per-solved-task + no-action-turn 占比 + pass rate 三件套，按题配对做 bootstrap CI，禁止只报 pass rate。
+- 备注：论文自述 preliminary work、n=50 偏小、多数 pass-rate 差异落在噪声内；40× 是 token/题口径而非质量口径。token 口径依赖各 harness 自身统计字段（Goose 只暴露 total），跨 harness 存在计量不完全一致风险。 ｜ 〔并集·Scaffold Effect(gapfill)〕反面/局限：任务量只有 50 个（Terminal-Bench Pro 分层子集），不是大型真实仓库编码任务；论文是终端类任务，外推到 SWE 类需自测。可搭配的 harness 设计清单：Inside the Scaffold（arXiv 2604.03515）按源码给出 13 个开源 scaffold 的三层 12 维分类，工具数从 0 到 37、上下文压缩有 7 种策略、11/13 个 agent 组合了多种循环原语。
+
+#### S127 · 在私有污染受控题库上做「厂商原生 harness vs 中立 harness」配对实验，检验换 harness 是否真能涨分
+
+- **大类/来源**：评测方法论｜[Harness or Model? Isolating the Harness Effect in Agentic Coding with a Contamination-Controlled Private Suite (arXiv 2609.11987)](https://arxiv.org/abs/2609.11987)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：在私有、污染受控的 256 题套件上，同模型换 harness 的平均通过率差异不显著（Opus 4.8：48.8% vs 50.0%，−1.25pp，95% CI [−10.0, +7.5]；GPT-5.5：55.6% vs 54.4%，+1.25pp，CI [−4.4, +6.9]）；但按任务类型分层差异极大——厂商原生 harness 在 61 个仓库任务上落后 9.0pp、在 19 个竞赛任务上领先 23.7pp；中立 harness 每个解决任务的成本是原生的 1.3–1.6 倍。
+- **证据**：80 个同题对：claude-opus-4-8 上跑 claude-agent-sdk 与 deepagents；gpt-5.5 上跑 openai-codex SDK 与 deepagents；gemini-3.5-flash、deepseek-v3.2 作为旁路格。800 次计划运行中 792 次由隔离 oracle 评分。分层：Opus 仓库任务 61 题原生落后 9.0pp、竞赛任务 19 题原生领先 23.7pp（label-permutation p=0.003，作者自述该分层是看到数据后划的，需设计性复现）。成本重定价（冻结列表价、按每轮原始用量）：中立 harness 每解决任务成本在 Opus 4.8 上为原生的 1.3–1.6 倍、GPT-5.5 上 1.2 倍；作者声明 Anthropic 侧有 58 次运行无 usage 记录，分配方式会把 Opus 比值推到 0.7–2.3，账单口径未定。另有 22/81 次在 wall-clock 上限被取消的运行其实已产出通过补丁。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 3。arXiv 2609.11987 摘要逐项吻合：256 题私有套件、Opus 4.8 −1.25pp CI [−10.0,+7.5]、GPT-5.5 +1.25pp CI [−4.4,+6.9]、仓库任务 −9.0pp vs 竞赛任务 +23.7pp（p=0.003）、中立 harness 成本 1.3–1.6×/1.2×；testability 给 3 分因需自建私有污染受控题库。
+- **测试设计**：在自建私有大仓库任务集上做同模型跨 harness 配对（≥50 对题/格），按仓库型 / 特性型 / 竞赛型分层分别报差值与 CI，并同时报 token 与真实计费口径。
+- 备注：重要的负面/纠偏证据：作者说明这是对 2026 年 8 月自己旧稿的修订（旧稿成本数字因遥测 usage 语义缺陷而错误）。任务集保持私有，外部无法复现。规模小（每模型 80 题）且分层是事后划分。
+
+#### S133 · 先做「最小可用 harness」基线，再逐步加复杂度——避免过度工程化（反面教训）
+
+- **大类/来源**：评测方法论｜[How Much of a Harness Does a Strong Agent Need for Autonomous ML Engineering? (arXiv 2609.40303)](https://arxiv.org/abs/2609.40303)｜证据等级：benchmark｜定级：**B**
+- **承诺改进**：在同一前沿 LLM 骨干、同一时间预算下，四个开源 SOTA harness（MLEvolve / AiScientist / Arbor / ScienceFlow）相对「单次会话 + 最小工具集」的基线 Malena 没有任何优势（17 个 harness–backbone 组合 × MLE-bench 30 任务、6 组合 × NatureBench 40 任务，Malena 全部持平或更优），作者结论是「在编码 agent 场景下围绕强模型堆手工 harness 回报很低」。
+- **证据**：Table 1（MLE-bench fixed14 子集、24h 预算）自选提交百分位：base 66.51 [62.46, 69.97] / +D(多分支检索) 63.62 / +P3(三路并行) 67.77 / +B+P3 58.91；奖牌率 base 55.7% / +D 45.2% / +P3 52.4% / +B+P3 33.3%。Table 2（NatureBench，超越 SOTA 比例%）：GLM-5.2 上 Malena 21.7 vs AiScientist 17.5 vs MLEvolve 10.8；Kimi-K3 上 26.7 vs 27.1 vs 11.7。成本侧：Malena 单会话把 cache-read token 放大一个数量级，GLM 5.2 上建模成本 $12.12 ≈ AiScientist 的 6.2 倍（$1.95），虽然 input/output token 量相当。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 3 / 可测性 4。全文逐格确认：Table 1 百分位 66.51/63.62/67.77/58.91 与奖牌率 55.7/45.2/52.4/33.3、Table 2（21.7/17.5/10.8 与 26.7/27.1/11.7）、17 组合 × 30 任务 + 6 组合 × 40 任务、成本 $12.12≈6.2×$1.95，全部吻合；『最小 harness 基线优先』的反面教训真实，但非仓库编码域证据，定 B。
+- **测试设计**：先固定一套最小 harness（bash-only + 线性历史）做基线，再逐条叠加自研的多 agent / 子代理 / 检索 / 规划组件，做「加一件就掉一点」的回归曲线，只保留有净收益的组件。
+- 备注：重要反面证据但任务域是 ML 工程/科研自动化而非软件仓库编码，任务分布与编码不同，结论外推需谨慎；作者自述 MLE-bench 任务准备存在问题并做了修复（fixed30/fixed14 子集），且明确指出「如何协调强 agent 达成共同目标仍是开放问题」。
+
+#### S141 · 多 agent 失败分类学与针对性干预（MAST）
+
+- **大类/来源**：评测方法论｜[Why Do Multi-Agent LLM Systems Fail? (MAST / MAST-Data, NeurIPS 2025)](https://arxiv.org/abs/2503.13657)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：14 种失败模式分 3 大类（系统设计 / agent 间失配 / 任务验证），标注 1642 条 trace、覆盖 7 个 MAS 框架：7 个 SOTA 开源 MAS 失败率 41%–86.7%；最高频失败为需求偏离 15.7%、信息传递不良 13.2%、角色定义不清 11.8%/步骤重复、不知终止条件 12.4%；针对性干预可提升成功率：改进 ChatDev 角色规范 +9.4%、加入高层任务目标验证 +15.6%。
+- **⚠ 勘误（K3 对照原文，以下口径为准）**：高频失败模式的「类别—占比」错配，正确对应：步骤重复 15.7%（最高频）、推理-行动不一致 13.2%、不知终止条件 12.4%、违反任务规范 11.8%（条目把 15.7% 安给「需求偏离」、13.2% 安给「信息传递不良」、11.8% 安给「角色定义不清」；上下文丢失实际仅 2.8%）。
+- **证据**：论文构建 MAST-Data：1,600+ 条跨 7 个 MAS 框架（含 AutoGen、MetaGPT 等）的标注轨迹，分类学由 150 条轨迹的严格分析导出，人工标注一致性 kappa=0.88；在 GPT-4、Claude 3、Qwen2.5、CodeLlama 四模型与编码/数学/通用任务上验证。LLM 判别器（o1+few-shot）识别失败准确率 94%、Cohen's κ=0.77，两个未见系统上人机一致性 κ=0.79。论文明确警示：MAS 在流行基准上的性能增益常常很小。
+- **K3 验证结论**：链接有效；claim 不一致；证据强度 4 / 大型仓库价值 4 / 可测性 4。NeurIPS 2025 失败分类学本体与干预数字真实可靠，可直接搬作产线失败标注体系；但条目的高频模式占比标注写错了类别名，引用前必须修正。
+- **测试设计**：先测量后实验：在自研产线 trace 上跑 MAST 标注建立协调失败基线率，再对每项通信策略做 A/B，观察该率与下游返工的变化；每项策略实验针对 Top-3 失败模式各上一项干预（步骤去重、显式终止条件、验证门），比较同类失败率与总 resolve rate。
+- 备注：失败率数字含 ChatDev/MetaGPT/HyperAgent 等系统与较弱模型设置，不能直接外推到前沿模型；标注依赖 200+ 人，分类器部署需自标数据；原始数据来自通用 agent 基准与短程编码任务，未覆盖 SWE-bench 式长程多文件编码轨迹，标签体系需自行适配扩充；LLM judge kappa 0.77 低于人工 0.88，单类占比结论应带误差条；标注本身有 token 成本。；核验问题：claim 中高频失败模式的「类别—占比」对应关系张冠李戴。论文 Section 4 实际为：FM-1.3 步骤重复 15.7%（最高频）、FM-2.6 推理-行动不一致 13.2%、FM-1.5 不知终止条件 12.4%、FM-1.1 违反任务规范 11.8%；claim 把 15.7% 安给「需求偏离」、13.2% 安给「信息传递不良」、11.8% 安给「角色定义不清」，均属错配（上下文丢失 FM-1.4 实际仅 2.8%）。其余核实无误：14 模式 3 大类、1642 条 trace、7 框架、失败率 41%–86.7%、kappa 0.88、LLM 判别器 94%/κ0.77、未见系统 κ0.79、干预 +9.4%/+15.6%、MAS 增益常很小的警示均与原文一致。；修正建议：将 claim 中「最高频失败为需求偏离 15.7%、信息传递不良 13.2%、角色定义不清 11.8%/步骤重复、不知终止条件 12.4%」改为「最高频失败为步骤重复 15.7%、推理-行动不一致 13.2%、不知终止条件 12.4%、违反任务规范 11.8%」。
+
+#### S147 · 分层基准组合：公开饱和集做回归、活水集做外推
+
+- **大类/来源**：评测方法论｜[SWE-bench-Live（Microsoft，NeurIPS 2025 D&B）](https://arxiv.org/abs/2505.23419)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：同一 harness+模型（OpenHands + Claude 3.7 Sonnet）在 SWE-bench Verified 上解决率 43.20%，在全量 SWE-bench-Live 上仅 19.25%（降一半以上）；月度自动刷新的任务流（RepoLaunch 管线）可持续供给未被污染的仓库级任务。
+- **证据**：SWE-bench-Live 论文：1,319 个实例、93 个 Python 仓库（2024-01 至 2025-04 的真实 GitHub issue）；Lite 子集 300 实例。同设置下 OpenHands+Claude 3.7 Sonnet：Verified 43.20% vs Live 19.25%；在已进入 SWE-bench 的仓库上 22.96% vs 非 SWE-bench 仓库 18.89%（约 4 个百分点差距，提示对旧任务仓库的隐性过拟合）；Gemini/Claude 官方 Verified 榜单已 >60%，Live 上最高 19.25%。实测 2024Q1–2025Q1 各季度解决率基本稳定（任务新近度影响小）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 5 / 大型仓库价值 5 / 可测性 3。NeurIPS 2025 D&B 活水基准，同设置腰斩数字是静态基准过拟合的硬证据；自建 Docker 管线成本高但方向必须采纳。
+- **测试设计**：对照组只在固定 Verified 快照上评测 harness 改进，实验组加入月度刷新的 Live 式新任务分片；用两组名次/增益的相关性检验改进是否真实可外推，而非只在旧任务上过拟合。
+- 备注：反面证据：同论文显示模型对 SWE-bench 仓库内任务高 4pp，说明任何固定任务集都会被生态逐步背熟；Live 环境构建依赖自动化 Docker 管线，自建成本高；Live 绝对分低意味着方差占比更高，需要更大实例数。多语言需求可参考 Multi-SWE-bench（arXiv:2504.02605，1,632 实例、7 语言、68 名标注者）。
+
+#### S148 · 按模型知识截止时间切片 + 活水题库抗数据污染
+
+- **大类/来源**：评测方法论｜[LiveCodeBench（UC Berkeley/MIT，NeurIPS 2024）](https://arxiv.org/abs/2403.07974)｜证据等级：benchmark｜定级：**B**
+- **承诺改进**：按题目发布时间戳切片可实测污染：DeepSeek DS-Base-33B 在其截止日期后的 LeetCode 新题上 pass@1 从约 60 跌到约 0（跌去约 60 个百分点）。
+- **证据**：LiveCodeBench 论文：持续收集 LeetCode/AtCoder/Codeforces 新题并带测试用例（首发版 400 题，2023-05 至 2024-05），覆盖代码生成、自修复、代码执行、测试输出预测四个场景；DeepSeek 系模型在截止日后题目上出现陡崖式退化（DS-Base-33B pass@1 ~60 → ~0），GPT-4-Turbo/Claude-3/Gemini-Pro/Mistral-L 未观测到同类陡降。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 5 / 大型仓库价值 3 / 可测性 4。NeurIPS 2024 污染实测方法学，时间切片计分是评测基建必备；但陡降证据来自竞赛题，对 GitHub 仓库任务的污染形态需另行验证。
+- **测试设计**：自建任务集为每条任务打「创建时间」与「是否已公开于 GitHub」标签；A/B 计分时只取所有被测模型截止日期之后的任务子集为主指标，pre-cutoff 子集仅作参考；每月从内部仓库流水线注入新 issue 生成活水分片。
+- 备注：时间切片要求维护模型 cutoff 元数据，混用多底座时按模型分片；DeepSeek 案例说明污染可以只在特定来源（LeetCode）发生，对 GitHub 类任务需另行验证；新题少时子集方差大，需配合置信区间。
+
+#### S149 · 弃用饱和基准、转向新基准 + 私有任务集（基准退役机制）
+> ⚠ **未核实条目（见 6.2）**：本条全部关键数字（74.9%→80.9%、138 题、59.4% 等）因 openai.com 反爬未能对源核实——下方 claim/evidence 中的具体数字一律不得外引，仅保留「基准退役机制」方向性结论。
+
+- **大类/来源**：评测方法论｜[OpenAI：Why we no longer evaluate SWE-bench Verified (2026-10)](https://openai.com/index/why-we-no-longer-evaluate-swe-bench-verified)｜证据等级：ablation｜定级：**B**
+- **承诺改进**：OpenAI 宣布停止以 SWE-bench Verified 作为主要评测：Verified 前 6 个月 SOTA 仅从 74.9% 升至 80.9%；对 o3 连续 64 次未稳定解决的 138 题（500 题的 27.6%）逐题审计，59.4% 存在实质缺陷（35.5% 测试过窄、18.8% 测试过宽、5.1% 其他）；用 GPT-5 做 15 轮红队诱导，在 GPT-5.2-Chat、Claude Opus 4.5、Gemini 3 Flash Preview 三家模型上都找到强污染实例；建议改用 SWE-bench Pro 与私有人工任务集（如 GDPVal）。
+- **⚠ 勘误（K3 对照原文，以下口径为准）**：全部关键数字未能对源核实（openai.com 反爬），本条仅保留「基准退役机制」的方向性结论；引用禁止携带具体数字。
+- **证据**：官方博客（2026-10 发布）：74.9%→80.9%（6 个月 SOTA 变化）；138 题 = 500 题的 27.6%，每题由 ≥6 名资深工程师审查，59.4%（35.5%+18.8%+5.1%）有实质问题；自动化红队协议为 GPT-5 对三个厂商模型各 15 轮诱导、judge 按污染强度分级，三家均出现强污染样本；Verified 的制作过程（1,699 题每题 3 名专家审查后留 500 题）也被完整披露。
+- **K3 验证结论**：链接**无效**；claim 未核验；证据强度 2 / 大型仓库价值 4 / 可测性 4。基准退役机制方向合理且 testDesign 可独立成立，但全部关键数字未能核实（官方域名反爬），按无法核实降级。
+- **测试设计**：设立基准退役机制：当内部固定集的 SOTA 连续两个季度涨幅 <3pp 或审计缺陷率 >25% 时降级为回归集；验收指标迁移到持续注入的私有集（每季度从真实产线 issue 抽样生成，做法仿 Verified：多专家逐题审查）。
+- 备注：该审计只覆盖 o3 未稳定解决的 138 题子集（选择偏差：已稳定解决的可能同样有缺陷但被掩盖）；私有集无法与社区榜单对比，需保留一条公开基准通道维持外部可比性。；核验问题：链接无法核实：WebFetch 两次抓取 openai.com 均 403，curl 带浏览器 UA 亦 403；Wayback Machine、r.jina.ai 代理、Bing/DuckDuckGo 搜索（含中文站）均未取得该页内容或任何转载。claim 中全部具体数字（74.9%→80.9%、138 题 27.6%、59.4%=35.5%+18.8%+5.1%、≥6 名工程师、GPT-5 十五轮红队、GPT-5.2-Chat/Opus 4.5/Gemini 3 Flash Preview、1,699→500、SWE-bench Pro/GDPVal）本次均未能对源核实，按规则不猜、降级处理。；修正建议：待网络可达时重新核验 openai.com 原文；若长期 403，补充互联网存档快照链接作为二手来源并在条目标注「未经一手核实」。
+
+#### S150 · 评测即实验：置信区间、配对差分析与功效分析
+
+- **大类/来源**：评测方法论｜[Adding Error Bars to Evals（Evan Miller, Anthropic, 2024）](https://arxiv.org/abs/2411.00640)｜证据等级：ablation｜定级：**A**
+- **承诺改进**：评测是抽样实验：给出三组公式分别用于分析评测数据、度量两模型差异、规划评测实验（功效分析定样本量），并论证应使用聚类标准误与配对差分析来避免 CI 虚窄。
+- **证据**：方法论论文（被引 ~180 次）：把评测题目视为来自「超级总体」的样本；提供 cluster bootstrap/聚类标准误、两模型配对差检验与实验前功效分析公式；配套建议被 Terminal-Bench 等公开榜单采用（其官方图表标注 95% CI）。相关工作 Quantifying Variance in Evaluation Benchmarks（arXiv:2406.10229）实证了 seed/温度/提示格式等运行间方差来源，并发现把选择题重述为补全题可降低约 7B 级模型的方差、而 IRT 等人文测试方法收效甚微。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 5。纯统计方法论、零落地成本，按 repo 聚类的 bootstrap 与配对差分析正是大仓库小样本 A/B 的裁判规则，应立即采纳。
+- **测试设计**：产线规则：任何 harness 对比必须 (1) 按 repo 聚类的 cluster bootstrap 95% CI；(2) 优先做同任务配对差分析而非只比总分；(3) 实验前用功效公式反推所需实例数与重复次数；(4) CI 不含 0 不得宣布改进。
+- 备注：功效分析依赖先验效应量（可从历史 A/B 的方差估计滚动更新）；bootstrap 在实例强相关时仍可能低估方差；该论文是通用方法论，未给出 SWE-bench 类任务「分辨 X pp 需要多少实例」的公开实测数。
+
+#### S151 · 榜单小差距不可排序：实例级配对检验 + model-scaffold 溯源
+
+- **大类/来源**：评测方法论｜[Coding Agents Have Converged: Why the SWE-bench Leaderboard Can No Longer Order Its Top Entries (ADMA 2026)](https://arxiv.org/abs/2609.17394)｜证据等级：ablation→**benchmark**（K3 修正）｜定级：**A**
+- **承诺改进**：审计 254 个 SWE-bench 提交（不重跑模型）：Verified 前两名各解 396/500 题、前十名共享 285 个成功与 51 个失败、真正能区分它们的实例只有 164 个；同模型不同 scaffold 的分数差最大达 29.8 个百分点（而前三十名总分极差仅 8.8pp）；精确配对 McNemar 检验在 α=0.05 下无法区分 Verified 前三十中任何一对相邻名次（0/29 对），Test split 仅 14/23。
+- **证据**：论文对四个人气 split 的 254 份提交做实例级集合分析：frontier 方案成功率中位嵌套度 0.935（对照「分数隐含」基线 0.774），说明头部方案解的是几乎同一批题；九个 cell-mean 交互检验中 6 个经 Holm 校正后仍显著，模型×scaffold 交互是分数的主要来源；作者发布分区数据与五步审计协议。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 5。数字全部吻合的 SWE-bench 榜单审计论文，per-instance 配对检验 + 溯源规范可直接搬进自研 harness 的 A/B 报告纪律。
+- **测试设计**：每次 A/B 保存 per-instance 通过矩阵；报告「分辨实例数」（两版本结果不同的任务数）与配对检验 p 值，而非只报总分；发布任何对比时附 model + scaffold 溯源（模型版本、scaffold 提交哈希、采样参数），仿官方 leaderboard 的 sb-cli 规范。
+- 备注：该审计是观察性研究（非受控实验），「未拒绝 H0」不等于等价；结论针对头部拥挤区（分数相近时），当两个版本真实差距大时 500 题仍可能足够；需要保留完整 per-instance 结果才能复算。；修正建议：evidenceGrade 由 ablation 改为 benchmark。
+
+#### S152 · 成本归一化指标：同等成本解决率 / 同等解决率成本
+
+- **大类/来源**：评测方法论｜[Epoch AI: The Plunging Price of Thought (2026-09) + aider polyglot 榜单](https://epoch.ai/publications/the-plunging-price-of-thought)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：达到同等基准性能的推理成本自 2023 年以来每季度下降约 47%（约每年 13 倍）：GPQA Diamond 75% 分数的成本从 o3（2025-01）约 $0.30/题跌至 GPT-5.6 Luna 约 $0.0004/题（约 725 倍，原文口径；按本条所列舍入价格 $0.30/$0.0004 计算为 750 倍，差异源于价格舍入）；性能刚成为 SOTA 时成本每季降 66%，两年后仅 32%。aider 榜单同时报告分数与每次运行成本：gpt-5(high) 88.0% / $29.08，DeepSeek-V3.2-Exp 70.2% / $0.88。
+- **证据**：Epoch 对 AIME、Chess Puzzles、FrontierMath(1-3)、GPQA Diamond、Mystery Game Puzzles 五个主基准拟合「性能-成本」曲线（SWE-bench Verified 在次要基准中），给出 47%/季度的中位降幅与分域差异（数学 50-52%/季、游戏 39-43%/季）；aider 官方 leaderboard 对 225 题×6 语言逐条标注 edit format、well-formedness 与 $ 成本（o3-pro 84.9% 但 $146.32）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 4 / 可测性 5。双来源数字全部核实，成本归一化指标是黑灯工厂控本的必备主指标，落地仅需在 rollout 里记账。
+- **测试设计**：每条 rollout 记录 token 与 $ 成本（按调用当日价格）；A/B 主指标改为「固定成本预算下的解决率」或「固定解决率下的成本」，并绘制 cost-quality 前沿；报告两个版本在前沿上的支配关系而非单点分数。
+- 备注：API 定价波动极快（47%/季度），成本数据必须带日期戳；prompt cache 折扣会扭曲 $/task 的可比性；固定预算评测（如 RE-Bench 的 8 小时预算）是另一种归一化方式，二者可并用。
+
+#### S153 · from-scratch 组件生成评测与反馈源消融（单测迭代 vs 静态分析）
+
+- **大类/来源**：评测方法论｜[Commit0 (Zhao et al., ICLR 2025, arXiv:2412.01769)](https://arxiv.org/abs/2412.01769)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：给定规格文档从零写整库（54 个 Python 库，lite 子集 16 个）：无反馈时 SOTA 模型在较易库只过 17% 单测、全量库仅 6%；对单测报错做迭代把较易库通过率提到 26%；换成 SWE-bench 式 agent（OpenHands）在 lite 上达 42.95%（比 SDE-I 高 13.65pp）、全量 15.25%；静态分析反馈对开源权重模型反而有害（Llama-3.1-405B 从 8.08% 降到 1.76%）。
+- **证据**：论文消融三级反馈：Claude 3.5 Sonnet 在 lite 上 stage1（仅草稿）17.80% → stage2（+静态分析）18.79% → stage3（+单测错误迭代）29.30%（成本 $99.39）；OpenHands 复用为-issue 修复 agent 反而最强，说明修 bug 与从零生成的能力高度不可迁移。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 5 / 大型仓库价值 4 / 可测性 4。ICLR 2025 论文，反馈源三级消融数字全部吻合，「单测错误迭代最优、静态分析可能有害」直接指导 harness 反馈环设计。
+- **测试设计**：对内部新模块任务建立「规格 + 单测」评测包；A/B 比较反馈环配置：无反馈 vs 单测错误迭代 vs +静态分析，按模型分层做（开源/闭源权重分开），主指标为单位测试通过率与 $ 成本。
+- 备注：静态分析反馈对部分模型有害是重要负面结果，不应默认加入产线；从零生成与修 bug 是两种能力，内部评测集应分轨统计；论文中部分强结果（如 42.95%）仅限 lite 子集。
+
+#### S156 · 三层 evals 基建 + 失败模式正则分类法（pass@k / pass^k / flakiness）
+
+- **大类/来源**：评测方法论｜[Cline evals 框架（evals/ 目录）](https://github.com/cline/cline/blob/main/evals/README.md)｜证据等级：ablation→**anecdotal**（K3 修正）｜定级：**B**
+- **承诺改进**：官方自建三层评测金字塔：L1 合同测试（无 LLM，测工具解析/格式转换）、L2 冒烟测试（5 个场景 × 3 次试验，算 pass@k、pass^k、flakiness=通过率熵）、L3 E2E（cline-bench 12 个真实生产 bug 修复任务，Docker/Daytona 经 Harbor 执行，规划夜间跑）；配套 cline-failures.yaml 用正则把失败分类为 provider_bug/transient/harness/environment/policy/auth，避免把基建故障误判为模型回退。
+- **证据**：evals/README.md:92-104 指标定义表（pass@k=P(≥1 of k passes)、pass^k=P(all k pass)、Flakiness=Entropy of pass rate；3 次试验全过=pass/全挂=fail/混合=flaky）；evals/ARCHITECTURE.md 测试金字塔图（Harbor 执行、夜间跑）；evals/analysis/patterns/cline-failures.yaml:1-58 每条 pattern 含 regex + category + 关联 issue（如 gemini thoughtSignature → issue #7974、429/超时 → transient、docker 失败 → environment）。当前状态：L2 部分停用（等指向新 SDK CLI），夜间 E2E 尚未实现（README TODO）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 2 / 大型仓库价值 4 / 可测性 5。框架与失败分类法描述全部属实且可直接移植，但属于工程实践而非实证结果，定级 B。
+- **测试设计**：不适用于 A/B——直接采纳为我们的评测框架设计：每个策略实验固定 3+ 次试验报 pass@3 / pass^3 / flakiness，先跑 failures.yaml 式归因再比较策略间差异；E2E 用容器化真实仓库任务。
+- 备注：连 Cline 自己也只做到 L1 常开、L2 半停用、L3 夜间跑（成本原因），说明全量 E2E 成本高；12 个 cline-bench 任务对策略筛选太小，需自建更大任务集。flakiness 用熵度量一致性是可直接抄的指标。；修正建议：evidenceGrade 由 ablation 改为 anecdotal。
+
+#### S167 · 自托管前缀缓存推理栈：RadixAttention + 缓存亲和调度（含生产级 KV 分离 Mooncake）
+
+- **大类/来源**：成本与推理效率｜[SGLang/RadixAttention（NeurIPS 2024）；Mooncake（USENIX FAST 2025）；另参 Prompt Cache（MLSys 2024）](https://arxiv.org/abs/2312.07104)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：SGLang 摘要声称 RadixAttention 以 radix tree 跨调用自动复用 KV cache，在多轮对话、few-shot、agent 控制流、JSON 解码、RAG 等负载上取得最高 6.4 倍吞吐（对比 SOTA 推理系统）；Mooncake（Kimi 生产系统的 KVCache 分离架构）摘要声称模拟场景吞吐 +525%、承接请求量 +75%；MIT Prompt Cache（prompt module 语义级复用）声称 TTFT 降低 8 倍（GPU）到 60 倍（CPU）。
+- **证据**：同行评审系统论文的公开基准成绩（本次已逐一核对 arXiv abs 页原文）：SGLang（arXiv 2312.07104，被引 1500+）；Mooncake（arXiv 2407.00079，FAST'25）为生产系统论文。另检索到 Mooncake 技术报告称长请求前缀缓存命中率 >75%，但该数字来自二手搜索摘要，本次未在原文核对，仅供参考。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 5 / 大型仓库价值 5 / 可测性 4。两篇均为同行评审系统论文且摘要数字逐一吻合；前缀缓存对共享仓库快照+系统提示的并行 agent 是最直接的成本杠杆。
+- **测试设计**：同一批大仓库任务，A 组请求随机路由到任意推理实例、B 组按 (agent, 任务) 前缀粘性路由；自托管 vLLM/SGLang 开/关 prefix caching，对比实测 cache hit rate、$/任务、TTFT 与端到端通过率。
+- 备注：harness 可控的是上下文布局与调度而非推理内核；收益完全依赖前缀稳定（把易变内容前置会摧毁命中）。API 侧等价物是 OpenAI prompt_cache_key 粘性路由（见「缓存友好的上下文布局」条）。Prompt Cache 需要把提示改写成可复用 module，侵入性较高。
+
+#### S168 · 缓存友好的上下文布局 + cache_key 粘性路由（2026 定价机制：写 1.25–2×、读 0.1×、cached input 10 倍价差）
+> ⚠ **部分未核实条目（见 6.2）**：OpenAI 侧定价、驻留与溢出阈值数字未核实（域名封锁）；已核实部分为「≥1024 token 前缀自动缓存」与「up to 80% latency reduction」（官方 cookbook）。下方 claim 中的数字须区分对待。
+
+- **大类/来源**：成本与推理效率｜[OpenAI Prompt caching 官方文档（2026，含 gpt-5.2 / gpt-5.1-codex-max）；Anthropic prompt caching 文档；Gemini 隐式缓存官方公告；DeepSeek-V3.2-Exp 官方新闻](https://platform.openai.com/docs/guides/prompt-caching)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：OpenAI 官方（本次已核对文档全文）：自动缓存 ≥1024 token 的前缀，官方口径为「reduce latency by up to 80% and input token costs by up to 90%」（cached input 10 倍价差，如 gpt-5.2 $0.125 vs $1.25/M、gpt-5.1-codex-max $0.25 vs $2.50/M）；内存驻留 5–10 分钟、可扩展至 24 小时，支持 prompt_cache_key 为每个 agent 绑定缓存路由，单 key 组合约 15 req/min 超出即溢出到其他机器。Anthropic：cache 写 1.25×(5min)/2×(1h) 基价、读 0.1×，官方称最高省 90% 成本/85% 延迟。Gemini 2.5 隐式缓存命中打 75% 折扣（官方公告）。DeepSeek V3.2-Exp 以稀疏注意力把 API 价格下调 50%+（官方新闻页）。
+- **⚠ 勘误（K3 对照原文，以下口径为准）**：OpenAI 侧定价数字（「up to 80% 延迟 / up to 90% 成本」、具体单价、驻留时长、溢出阈值）未能核实（域名封锁）；已核实部分：≥1024 token 前缀自动缓存与「up to 80% latency reduction」（官方 cookbook）。claim 一致性为「部分一致（未核实）」。
+- **证据**：全部为厂商官方文档/公告（OpenAI 部分为本次全文核对；Anthropic 的 1.25×/0.1× 与 90%/85% 来自其官方文档经搜索结果转述；Gemini 75% 来自 Google 官方公告；DeepSeek 50%+ 来自 api-docs.deepseek.com 官方新闻）。仍是厂商定价主张，无第三方在 coding agent 负载上的对照实测——该遗留缺口由「成本效率设为一等评测指标」条与上述 A/B 设计补位。
+- **K3 验证结论**：链接**无效**；claim 部分一致（未核实）；证据强度 2 / 大型仓库价值 5 / 可测性 5。机制（前缀缓存折扣）真实且可在自家账单直接实测，但具体定价数字多数未能在本环境核实，按证伪原则降级处理。
+- **测试设计**：同一批任务，A 组动态系统提示/时间戳前置/共享 cache_key，B 组稳定前缀+append-only+易变内容后置+按 agent 分 key；对比 API 响应中 cached_tokens 占比、账单 $/任务与通过率。
+- 备注：定价数字是厂商主张，但 cached_tokens 与账单可在自研 harness 内直接实测，是自证成本最低的策略。风险：上下文插入时间戳/随机 ID、多 agent 轮换系统提示、中途改写历史都会摧毁命中；~15 req/key/min 溢出阈值意味着超高并行度需做 key 分片。；核验问题：本环境无法打开 platform.openai.com（Cloudflare 区域封锁：WebFetch 两次 403、curl 403、真实浏览器亦被 Cloudflare 拦截），help.openai.com、r.jina.ai、archive.org、DuckDuckGo/Bing 均不可达，故 OpenAI 侧核心数字（「up to 80% latency / up to 90% cost」、gpt-5.2 $0.125 vs $1.25/M、gpt-5.1-codex-max $0.25 vs $2.50/M、5–10 分钟驻留/24 小时、~15 req/min/key 溢出阈值）本次均未能核实。已核实的部分：OpenAI 官方 cookbook（raw.githubusercontent.com/openai/openai-cookbook/main/examples/Pr；修正建议：link 本身应为规范地址（platform.openai.com/docs/guides/prompt-caching），建议保留但标注「本环境 Cloudflare 封锁，经 OpenAI 官方 cookbook 部分核实」；claim 中 OpenAI/Anthropic/Gemini 定价数字建议标注「厂商文档口径，本次未能直接核实」。
+
+#### S169 · 批处理 API 半价跑云端并行评测（OpenAI Batch / Anthropic Message Batches 均 5 折）
+> ⚠ **未核实条目（见 6.2）**：两家 50% 折扣与 24h SLA 均未能在文档级核实；机制公开、可在自家账单直接实测。
+
+- **大类/来源**：成本与推理效率｜[OpenAI Batch API 官方文档与 FAQ；Anthropic Message Batches API 官方文档](https://developers.openai.com/api/docs/guides/batch)｜证据等级：anecdotal｜定级：**B**
+- **承诺改进**：两家厂商对异步批处理请求一律 5 折（输入+输出均半价），24 小时内返回结果；OpenAI FAQ 明确所有模型 50% 折扣，Anthropic 为 2024-10 上线的同价机制。
+- **⚠ 勘误（K3 对照原文，以下口径为准）**：两家 50% 折扣与 24h SLA 均未能在文档级核实（OpenAI 域名封锁、Anthropic 页面 JS 渲染）；机制属公开且可在自家账单自验。
+- **证据**：官方定价文档（厂商主张但数字与机制明确、可直接验证账单）；适用对象是非实时负载——大规模 A/B 评测、回归测试门禁、数据蒸馏。
+- **K3 验证结论**：链接**无效**；claim 未核验；证据强度 2 / 大型仓库价值 4 / 可测性 5。机制是公开且账单可自验的，但本次在本环境完全无法核实来源，按证伪原则记为未核实并降为 B。
+- **测试设计**：同一评测批次一半走同步 API、一半走 Batch API，对比实付成本、完成时间分布、失败/重试率，核算净节省与新增延迟成本。
+- 备注：24h 窗口与更低速率限制是硬约束，交互式/在线环节不可用；失败任务的退单与重试逻辑要计入成本模型，否则半价可能被重试吃掉。；核验问题：developers.openai.com 与 platform.openai.com 均被 Cloudflare 封锁（403×2 + 浏览器拦截），help.openai.com 403；Anthropic batch 文档 HTML 可抓取但正文 JS 渲染，静态文本中未找到「50% / 24 hours」的文档级表述（仅营销壳字符串 'Save 50% with batch processing'，不足以算文档核实）。本次未能核实任何一方的 50% 折扣与 24h SLA 数字。evidenceGrade=anecdotal 如实。；修正建议：link 建议改为 https://platform.openai.com/docs/guides/batch（当前 developers.openai.com 是新版文档站，两者均规范）；claim 建议标注「厂商文档口径，本次因网络封锁未能核实」。
+
+#### S170 · 把成本效率设为一等评测指标（SWE-Effi 效率重排 + Agentless/mini-swe-agent 成本基线）
+
+- **大类/来源**：评测方法与成本｜[SWE-Effi（arXiv 2509.09853，SWE-agent 团队）；Agentless（arXiv 2407.01489）；mini-swe-agent（GitHub SWE-agent/mini-swe-agent）](https://arxiv.org/abs/2509.09853)｜证据等级：benchmark｜定级：**A**
+- **承诺改进**：SWE-Effi 用「效果=解决率/消耗（tokens、时间、调用数）」多维指标在 SWE-bench Verified 50 题分层子集上重排 5 scaffold×3 模型，发现 token 雪球效应与「昂贵失败」：未解决尝试平均耗 8.8M tokens/658s，成功仅 1.8M/167.2s（>4 倍）；scaffold 与基模的配合度比 scaffold 本身更决定效率。Agentless 论文自报约 $0.34/实例；mini-swe-agent README 称 100 行 Python 实现 >74% SWE-bench Verified。
+- **证据**：公开基准上的系统对照实验（本次已核对 HTML 全文数据）：SWE-Agent+GPT-4o-mini 仅 10% 解决率且 181 次调用/8.1M 输入 tokens（token 成本 18 倍于最优组合）；AutoCodeRover+Qwen3-32B 38% 解决率仅 55.5K 输入 tokens；Agentless+Qwen3-32B 48% 解决率；OpenHands+Llama-3.3-70B 失败 238.9s vs 成功 79s。EuCB 评分设 $1/题成本上限与 2M token 预算。swebench.com 官方榜单含 per-instance 成本列（mini-swe-agent 条目约 $0.46–$0.72，2025-11，来自榜单页搜索摘要，未直接核对页面）。
+- **K3 验证结论**：链接有效；claim 一致；证据强度 4 / 大型仓库价值 5 / 可测性 5。正文数字全部吻合；「成本一等指标+昂贵失败」直接对应黑灯工厂按任务计费的经济性，且三指标（$/resolved、失败/成功成本比）在自研 harness 内极易落地。
+- **测试设计**：harness 每次运行统一产出 $/resolved、tokens/call、失败均值÷成功均值三个成本指标；任何策略 A/B 时成本曲线与通过率同报；并以 mini-swe-agent 作为最小成本基线组。
+- 备注：SWE-Effi 出自 SWE-agent 团队（对自己 scaffold 有立场风险，但对照含 OpenHands/Agentless 等竞品）；$0.34 与榜单成本数字为论文/榜单自报。失效风险：为省 token 砍验证轮次会拉低一次通过率，须以 resolved/$ 而非绝对成本为优化目标。
+## 四、负面结果与争议
+
+以下 4.1–4.6 共列出 **33 条**以负面结果、边界条件或争议证据为主的条目（按定级 **A19/B13/C1**；其中 S011/S109 以「必须打平的对照 / 边界条件」身份收录）。另有 4 条存疑条目见 4.7，不计入本节数目（详见 6.2）。它们的价值不在提分，而在划清「哪些默认做法不成立」——每条都应转化为 A/B 计划里的一个对照臂或一个门禁。
+
+### 4.1 反思与自修正：纯语言自评不构成可靠改进
+
+- [CRITIC（ICLR 2024）](https://arxiv.org/abs/2305.11738)（S085）：只有把校验外包给工具（Python 解释器等）再据此修正，自我修正才有稳定增益；去掉工具改纯语言自评后增益消失甚至转负。**适用条件**：任务存在可执行校验器；对无执行信号的领域（如纯文本评审）不成立。这是「执行信号优于口头自评」最硬的一类证据。
+
+- [Cannot Self-Correct](https://arxiv.org/abs/2310.01798)（S071）：不给外部信号、只靠模型自判对错的内在自纠错在所有被测基准上都降低正确率——模型会把原本正确的答案改错。**推论**：harness 里「自查一下再交」类组件必须绑定外部信号，否则默认关闭。
+
+- [安慰剂对照：盲重采样优于自修复](https://arxiv.org/abs/2607.26117)（S086）：不给模型看上次失败输出的盲重采样，在 1.5B/3B/7B 三个尺度上不劣于任何自修复条件，且省 2.5–5.5 倍 token。**局限**：小模型 + MBPP+；需在大模型 + 仓库任务复测。**A/B 含义**：任何反思回路实验必须带「盲重采样」安慰剂臂，否则收益可能只是「多试一次」。
+
+- [LLM-as-judge 无法为反思定时](https://arxiv.org/abs/2606.04296)（S087）：让 LLM 判断「此刻该不该停下来反思」本身不可靠——连人类标注的干预点都不一致。**推论**：否决「LLM judge 定时反思」组件；反思触发应改用确定性信号（测试失败、lint 错误、停滞计数 S157）。
+
+- [伪修 bug 循环](https://arxiv.org/abs/2609.10123)（S089）：LLM 持续声称在完全没有 bug 的程序里发现 bug；「修好有 bug 程序」的比例低于「破坏正确程序」的比例；长期演化进入同一改动反复加上又撤掉的伪修循环。**处方**：修复必须由可复现 failing test 触发——直接约束无人产线的 reviewer-fixer 编排。
+
+- [自我纠错盲区](https://arxiv.org/abs/2507.02778)（S088）：模型能纠「别人指出的错」却纠不了「自己刚犯的错」；同样上下文只改错误归属（从「我自己」改为「外部指出的」）纠错率大幅上升。**局限**：非编码域、非推理模型，属措辞级假设，落地前需自测。
+
+- 另外，经典 [Reflexion](https://arxiv.org/abs/2303.11366)（S022） 自带反面消融：测试假阳性会使反思退化——反思内容必须来自可信执行信号。
+
+### 4.2 上下文压缩与记忆：省 token ≠ 更好
+
+- [8 种记忆压缩策略系统比较（含负结果基线）](https://arxiv.org/abs/2605.18854)（S009）：没有任何压缩器显著提升任务输出质量，LLM 摘要压缩器反而使 token 成本上升 24–94%；仅工具输出掩码实现 8.6% 净 token 节省；最优策略随领域与任务长度变化。**推论**：先测零 LLM 成本手段（掩码/清理/外置），LLM 压缩只作为对照臂。
+
+- [token 少 ≠ 更快更便宜](https://arxiv.org/abs/2609.32961)（S017）：把「压什么、何时压、压多少」从固定策略中拆解后发现，更少 token 未必更快更便宜；压缩必须按任务、模型与负载定制，并用执行侧指标（成功率/延迟/成本）评估。**推论**：压缩策略评测必须带延迟与成本否决条件。
+
+- [STALE 过期记忆基准](https://arxiv.org/abs/2605.06527)（S025）：400 个冲突场景上最佳模型整体准确率仅 55.2%，核心失败模式是「新观察隐式使旧记忆失效」而模型既难识别也难据此行动。**推论**：一切记忆/技能资产的守门测试——记忆要带失效检测（另见 S162）。
+
+- [context poisoning 治理](https://github.com/RooCodeInc/Roo-Code/blob/main/apps/docs/docs/advanced-usage/context-poisoning.md)（S155）：错误数据进入上下文会持续污染后续推理；官方结论是「唤醒提示词无效，唯一可靠恢复是硬重置会话」。「唤醒提示词无效」本身是可消融假设；防御性做法是在坏工具结果进入上下文前删掉该消息。
+
+### 4.3 技能、规则与上下文文件：注入不等于收益
+
+- [SWE-Skills-Bench](https://arxiv.org/abs/2603.15401)（S160）：49 个公开技能里 39 个 pass rate 零提升、平均仅 +1.2%，token 开销从节省到 +451% 不等；3 个技能因版本不匹配劣化最多 −10%。**推论**：技能默认无边际收益，必须成对开/关测过才准入。
+
+- [技能注入可能在 1/3 任务上帮倒忙](https://arxiv.org/abs/2610.08875)（S124）：同一技能跨配置表现不一致（在某配置有益、另一配置帮倒忙）的任务占 36.78%；按「对所需操作的支持度」重排候选可提升首选通过率 4.35–5.80pp。**勘误警示（条目备注原文）**：「36.78% 任务上技能有正有负」的口径是「同技能跨配置表现不一致」，容易被误读为「36.78% 的技能有害」——正确结论是「技能/计划注入不能默认正收益、必须按配置成对测量」。**局限**：SkillsBench 域非大型真实仓库。
+
+- [规则极性治理](https://arxiv.org/abs/2604.11088)（S161）：随机规则与专家精编规则对 coding agent 的提升相当（均 +13.8pp），收益基本与内容无关（打乱、错领域、错格式的规则都能追平精编规则，指向 context priming）；条目备注同时提醒：「单独看有益的规则全是负向约束」这一观察样本有限、『负约束更好』的因果解释尚不牢固（实验仅覆盖 SWE-bench Verified 判别子集 + Claude 一家闭源模型）。**推论**：把「优先收负向约束」当**待验证假设**进三臂 A/B（精编规则 / 随机规则 / 负向约束子集），不要当定论写进审核规范。
+
+- [AGENTS.md/CLAUDE.md 不保证正确性](https://arxiv.org/abs/2607.27250)（S178）：两个前沿 agent × 3 仓库 × 17 真实任务 × 288 次带金标准测试的运行上，上下文注入策略在任何一个 agent 上都没有可测地移动正确性（等价性检验把效应上界压到 ≤10–15pp）。**推论**：工程预算从「写上下文文件」挪到「调优文件与验证器」（S179 的探针-精炼自动调优是正面出路）。
+
+- [技能静默过期](https://arxiv.org/abs/2608.21964)（S162）：57 仓库 105 次版本跃迁每一次都让 V1 技能集部分失效；6 个前沿 agent 在移除过期技能的指标上 macro F1 仅 29.9%–69.7%。**推论**：技能库要有版本绑定与失效检测，否则长期资产变负资产。
+
+- [深度 agentic 检索被证伪（限定只读问答）](https://arxiv.org/abs/2608.01507)（S166）：对可索引仓库的只读代码问答，预建语义搜索答对 65.2%，深度 agentic 检索（派子 agent 在隔离窗口 grep）只答对 46.2%，且前者每个正确答案成本不到后者一半。**适用条件**：只读问答域；外推到改码任务需谨慎——但它直接打击「检索就派子 agent」的默认设计。
+
+- [CodeGrep 阈值判据](https://arxiv.org/abs/2608.05886)（S013）：检索精度不跨阈值时下游收益不出现——「低精度检索不如不检索」可用现成检索器零训练复测，作为检索层准入门槛。
+
+### 4.4 多 agent 协同：边界、失败模式与合并风险
+
+- [动态并发的任务边界](https://arxiv.org/abs/2610.10263)（S132）：2,124 次受控执行显示动态并发只在长时程任务上有效（LoopsBench 最高 +14.3pp）；在 SWE-bench Verified 这类有界任务上 Claude Code 最多 **−24.0pp** 显著倒退。**推论**：并发闸门按任务时域/类型门控，短任务默认单线程。
+
+- [MASLab 横评](https://arxiv.org/abs/2505.16988)（S140）：20+ 方法 × 10+ 基准 × 8 模型：无一种 MAS 方法全领域占优；最佳 MAS 与单 agent 的差距在 Llama-3.3-70B 上 4.7%、换 Qwen-2.5-72B 缩至 1.7%——模型越强协同增益越小，部分 MAS 反而低于单 agent。
+
+- [任务结构决定架构收益](https://arxiv.org/abs/2512.08296)（S143）：260 配置 × 6 基准 × 5 架构：相对单 agent 收益从 +80.8%（可分解任务）到 −70.0%（顺序规划任务），存在能力饱和效应。**推论**：任务路由前先给任务「可分解性」分桶。
+
+- [多智能体辩论不优于自洽](https://arxiv.org/abs/2311.17371)（S115）：把响应数对齐后，辩论反而更差。**推论**：复杂协同方案必须打平「同预算采样-投票」基线（S142）才值得上。
+
+- [Don't Build Multi-Agents（观点，C 级）](https://cognition.com/blog/dont-build-multi-agents)（S111）：共享完整上下文、动作携带隐式决策、编码长任务默认单线程。观点文章零实证，作红线警示而非证据；并行写码的真实增益必须靠自家 A/B 测出。
+
+- [Merge-Bench：自动合并能力天花板](https://arxiv.org/abs/2605.25890)（S146）：7,938 个真实冲突 hunk 上最强模型（Gemini 2.5 Pro）多语言合计正确率仅 52.6%——「最好的模型也只能正确消解不到 60% 的合并冲突」。**推论**：LLM 合并必须建议 + 强验证门禁化，冲突归因遥测（S171）与冲突预测排程（S172）前置。
+
+- [零共享上下文评审](https://cognition.com/blog/multi-agents-working)（S144）：独立 reviewer 平均每 PR 发现 2 个 bug、约 58% 为严重问题，且「上下文零共享反而更好」。**争议**：数字来自厂商遥测、无对照——当假设不当结论，A/B 成本极低值得测。
+
+- [reward hacking 在多 agent 系统内传播](https://arxiv.org/abs/2610.12822)（S117）：RL 诱发的 hacking 策略经代码、共享记忆与自然语言计划跨 agent 传播，小模型诱发的 hack 能影响更强闭源模型。**推论**：verifier 上下文隔离与共享记忆审计是必做项。
+
+### 4.5 测试时扩展：加算力的边际条件
+
+- [overthinking](https://arxiv.org/abs/2604.10739)（S095）：推理 token 增加时边际收益大幅递减；模型会「说服自己」放弃已正确的答案；最优思考长度随难度变化，均匀分配算力次优。**推论**：升档（更高 effort）要按任务难度调度（S093）而非全局打开。
+
+- [verification gap](https://arxiv.org/abs/2602.18998)（S096）：10 个主流 agent 上「两条扩展轴都无法从额外测试时计算持续获益」——并行扩展被验证器缺口卡住。**推论**：没有可靠验证器时，先建验证器（S072/S099/S101–S104）再谈并行扩展。
+
+- [compute 对齐下顺序精修优于并行自洽](https://arxiv.org/abs/2511.02309)（S097）：同等 token 预算下顺序精修一致优于并行 self-consistency（推理基准域，需代码域复测）。
+
+### 4.6 规划与 scaffold 复杂度：更少常常更多
+
+- [NanoHarness 组件消融](https://arxiv.org/abs/2609.32459)（S121）：10 个开源模型 × 3 基准的五组件消融中，结构化工具使用与任务专用 subagent 提升最稳，而显式规划/通用 subagent 组件**可能对仓库级生成任务有害**。
+
+- [最小可用 harness 基线](https://arxiv.org/abs/2609.40303)（S133）：同骨干同时间预算下，四个开源 SOTA harness（MLEvolve/AiScientist/Arbor/ScienceFlow）相对「单次会话 + 最小工具集」基线没有任何优势（17 组合 × MLE-bench）。**推论**：任何 harness 复杂度增加都要先过「最小基线」对照。
+
+- [计划的双刃](https://arxiv.org/abs/2604.12147)（S109）：给标准计划提升解决率、周期性计划提醒减少违背，但「次优计划比完全没有计划更糟」，早期插入额外阶段反而降性能。
+
+- [Agentless 强基线](https://arxiv.org/abs/2407.01489)（S011）：不做自主规划、固定三阶段流水线 + 采样选优即可拿到当时开源最好成绩——自主循环必须打平固定管线才值得其复杂度。
+
+### 4.7 存疑与未决（详见第六节）
+
+- [OpenAI 基准退役机制](https://openai.com/index/why-we-no-longer-evaluate-swe-bench-verified)（S149）：全部关键数字因官方域名反爬未能核实，仅保留方向性结论。
+
+- [每任务一次性断网沙箱](https://openai.com/index/introducing-codex/)（S073）：一手链接打不开，设计经二手报道佐证；机制是并行产线标准底座但无受控证据。
+
+- [缓存友好上下文布局 + cache_key 粘性路由](https://platform.openai.com/docs/guides/prompt-caching)（S168） 与 [批处理 API 五折](https://developers.openai.com/api/docs/guides/batch)（S169）：机制公开且账单可自验，但本次未能核实来源文档（OpenAI 域名封锁），定价数字按未核实处理。
+
+## 五、对并行 A/B 测试计划的建议
+
+### 5.1 优先级排序
+
+**第 1 批（P0：接口与上下文底座 + 评测纪律）**——成员按证据分两类：**A 级进受控 A/B；B 级属「必建基建」，机制经文档/源码核实但无对照数字，按部署验收 + 观察性指标管理，不进效应结论。**
+
+*A 级成员（证据硬，直接受控 A/B）：*
+1. 补丁产出管线：模型改文件 + runner 从 git 状态导出 patch（S128，19.3%→71.2%）——单体产线第一杠杆。
+2. 上下文治理主实验：工具结果清理（S002）与观测掩码（S009）为主臂，LLM 压缩（S001/S082）为对照臂——先测零 LLM 成本手段。
+3. ACI 四件套：窗口化查看器（S061）、编辑 lint 门禁（S062）、摘要式搜索（S063）、SEARCH/REPLACE 柔性解析（S077）+ 编辑格式按模型路由（S065）。
+4. 约束钉存（S033）：确定性打分、A/B 成本极低。
+5. 并行选优管线：N 路 rollout + critic/测试投票选优（S091/S092/S046/S072/S094/S099），配回归测试最小化（S104）与影响分析选测试（S103）；chooser 收益按 S098 的警示单独测、不预设能逼近 pass@k 上限。
+6. 规则与技能准入治理：S161 三臂实验（精编规则/随机规则/负向约束子集——把「负约束优先」当假设验证而非定论）、技能成对开/关准入（S160/S053）、大库显式预选（S051/S052）。
+7. 评测台纪律先行：$/resolved 主指标（S152/S170）、配对检验与功效分析（S150/S151）、共享评测任务集构建（见 5.5）、活水/私有题库（S147/S148/S122）。
+
+*B 级成员（必建基建，按部署验收，不宣称效应）：*
+- hooks 门禁（S042）、Docker 沙箱 + 镜像分层缓存（S045）、每任务断网沙箱（S073——一手来源失效，见 6.2）、影子 checkpoint（S154）、大输出外置（S083，可与第 2 条同族并入 A/B）。
+
+**第 2 批（P1，多 agent 与路由，需调度基建）**
+- 动态并发按任务时域门控（S132）；停滞计数 + 重规划清零（S157）；依赖感知 DAG 委派（S113/S114）；子代理上下文隔离与摘要回传（S004）。
+- 强弱模型协同：探索/修复分档（S015）、轨迹级路由（S134）、投机执行（S135，需环境快照与读写工具硬隔离，基建重但无需训练）、交接税约束（S136）、per-role 模型路由（S159）。
+- 合并治理：冲突预测排程（S172）+ 合并门禁遥测（S171）+ LLM 合并建议-验证分离（S146）。
+- 评审线：fresh-context 终审（S029）、独立 verifier 上下文隔离（S107/S117）、Agent-as-a-Judge 配只读工具（S105）。
+
+**第 3 批（P2，依赖训练设施或重基建）**
+- RL 训练检索 agent（S013）、Context Folding（S008）、harness 闭环自动演化（S131）、STAIR 计划复用（S110）、自托管前缀缓存栈（S167）、组件级 harness 消融台（S129/S126/S127）。
+
+**负面证据驱动的「减法」实验（与加法同批）**
+- 自修复回路的安慰剂臂（S086）、反思定时确定性化（S087/S157）、去掉正向规则（S161）、去掉 AGENTS.md 注入（S178）、短任务关并发（S132）、技能库瘦身（S160/S162）。
+
+### 5.2 混杂控制
+
+- **三同原则**：同模型、同任务集、同预算（token 与美元双口径）；任何一臂换了模型档位即作废（S093：档位本身影响 token −48%~−76%）。
+- **配对设计**：同任务实例两臂配对，per-instance 配对检验（S151）；按仓库聚类做 bootstrap / 聚类标准误（S150），避免 CI 虚窄。
+- **按「模型 × harness」配对报告**：跨 harness 的模型排名会反转（S175），结论必须绑定配置而非泛化。
+- **冻结版本**：harness 版本、提示词模板、工具清单全部版本化并随结果归档（S130：35 个 release 分数 23–39% 无趋势波动、token +70%——版本漂移足以淹没处理效应）。
+- **控制缓存命中**：prompt cache 粘性路由与预热状态会造成虚假差异（S167/S168），两臂的缓存策略与调度亲和必须对齐或在分析中计入。
+- **抗污染**：私有/活水题库或按知识截止切片（S147/S148）；警惕基准记忆污染虚增「反思/检索改进」（S122）；自建任务需审计解法泄漏与弱测试（S076）。
+- **环境一致**：一次性沙箱 + 固定镜像 tag + 依赖白名单（S045/S073），避免环境漂移。
+- **必设对照臂**：自修复实验带盲重采样安慰剂臂（S086）；压缩实验带「无压缩 + 掩码」臂（S009）；多 agent 实验带「同预算单体」与「采样-投票」双基线（S142/S115）；复杂 harness 带最小基线（S133/S064）。
+
+### 5.3 样本量与统计功效（粗略建议）
+
+- 以「每任务 resolved/失败」的配对二项结果为基本单元，按 McNemar 配对检验样本量公式 **n = (z₁₋α/₂·√d + z₁₋β·√(d−Δ²))² / Δ²**（d=两臂不一致对占比，Δ=目标检出差；公式框架出自 S150 的配对差分析）做工作示例：基线 50%、检出 +5pp、双侧 α=0.05、功效 80% 时，取 d=10%（如 p₁₀=7.5%、p₀₁=2.5%）得 n≈312，取 d=15% 得 n≈470——故 **检出 +5pp 约需 300–470 个配对任务**；检出 +2.5pp（d=9.5%）得 n≈1,190，即 **+2–3pp 需 1,000+ 量级**。按仓库聚类时再乘设计效应 1+(m̄−1)ρ（S150 的聚类标准误；m̄=每仓平均任务数）。注意：以上是**本报告的方法学工作示例**（假设须按自家任务分布校准），非来源条目直接给出的人数；量级参照：S129 用 176 组匹配设置、S132 用 2,124 次受控执行、S178 用 288 次运行才把效应上界压到 10–15pp。
+- 分级标准：进产线默认（一级结论）n≥500 配对任务（覆盖 d=15% 时检出 +5pp 的功效要求）；探索性结论 n≥100；可测性 5 分的纯工程开关（如 lint 门禁、输出外置）可先 50–100 例先导，效应方向一致再放大。
+- 多重比较：每批并行测 K 个策略时用 Benjamini–Hochberg 控制 FDR；先导显著者进确认批复测一次。
+- 成本/时长类指标呈重尾分布：报告中位数与截尾均值；配对差用按任务聚类的 bootstrap，不用正态近似（S150）。
+- 结果按任务难度/时域/上下文窗口分层报告（S036/S129：组件收益随窗口收紧而放大），防止辛普森悖论。
+
+### 5.4 成本归一化指标
+
+- **主指标 $/resolved**（等成本解决率）：同等性能推理成本每季约降 47%（S152），跨批次比较必须同模型同价格表。
+- **辅指标**：tokens/resolved、失败/成功成本比（S170：未解决尝试平均 8.8M token/658s vs 成功 1.8M/167s——「昂贵失败」占比是产线健康度核心信号）、格式符合率与首过/重试双口径（S079）、pass@k/pass^k/flakiness（S156）。
+- **每 rollout 记账**：输入/输出/缓存命中 token 分列、单价、墙钟、重试次数；批处理折扣与缓存折扣按账单实价计入（S168/S169，机制可在自家账单直接验证）。
+- **分数与成本必须同时报告**：只报 resolved 率会漏掉跨 harness 40× token 差（S126）；只报成本会漏掉质量塌方；token 少 ≠ 更快更便宜（S017）。建议每条结论以「效应量 + CI + $/resolved 变化」三元组呈现。
+### 5.5 共享评测任务集：先于任何一批实验建好（可执行性前提）
+- **分层结构（本报告的落地方案）**：① 公开活水层——SWE-bench-Live 月度刷新任务流，做回归与外推分层（S147：同设置在 Live 上成绩腰斩，是静态基准过拟合的硬证据）；② 自建私有层——从产线真实任务录制（仓库快照 + issue + 开发者已合并的 PR 作 ground truth + 金标准 fail-to-pass 测试），规模与 5.3 对齐：一级结论 ≥300 个配对任务实例，覆盖 ≥20 个真实仓库、≥3 种语言，并按任务时域（S036）与上下文窗口（S129）分桶。
+- **去污染方案（综合 S147/S148/S076/S122）**：记录每题 issue/PR 创建时间戳，早于所用模型知识截止时间的任务标记为「污染层」，只用于回归、不用于效应外推（S148 时间切片法：截止后新题 pass@1 从约 60 跌到约 0）；新任务入库前跑 SWE-Bench+ 式审计——查解法泄漏（原版 32.67% 的「成功」靠 issue 文本作弊）与弱测试（31.08% 通过可疑）（S076）；金标准测试必须 fail-to-pass 且被 ground-truth patch 接受（S101/Otter 范式）；对已判「解决」的任务抽样做 TestJack 式针对性测试复判，估计 reward-hack 率（S123：34.4% 被判正确的 trial 实际违规）。
+- **治理**：任务集版本化并随每批实验归档；每季度轮换 ≥30% 活水任务；私有任务集不进入任何模型的训练分布（仅经 API 交付并关闭训练用途）。
+- **边界声明**：S147/S148/S076/S101/S123 五条提供的是原则、工具与教训；具体仓库清单、录制管线与规模数字需在产线落地时确定——本节是方案设计，不是已验证结论。
+
+## 六、存疑与剔除清单
+
+### 6.1 剔除条目（133 条，不计入收录与统计）
+
+剔除主因五类：**① 证据域外**（对话/QA/竞赛/网页/游戏等非编码基准）；**② 与已收录条目重叠**（压缩默认值家族、技能组织家族、多 agent 编排家族、强弱模型级联家族）；**③ 机制描述/厂商经验无对照数字**；**④ 弱模型时代结论过时**（2023 年前后基线）；**⑤ 落地依赖训练设施或不可复现的商业集**。完整剔除清单如下：
+
+
+**分片 A（上下文/记忆/长程）（27 条）**
+
+| 候选策略 | 剔除理由（节选） |
+|---------|----------------|
+| [检索内容压缩与选择性增强（RECOMP）](https://arxiv.org/abs/2310.04408) | 压缩家族证据在 QA/LM 域（ICLR 2024）、无编码基准数字；编码域上下文压缩已由 ContextSniper(S016)/观测掩码(S009)/SJC(S032) 覆盖 |
+| [ACON：基于失败案例迭代优化的历史/观测压缩指南（免训练、自然语言空间）](https://arxiv.org/abs/2510.00615) | 证据在 AppWorld/OfficeBench 非 SWE 域、依赖蒸馏小模型压缩器落地重；压缩元优化思想并入 S032 的测试设计 |
+| [自信息过滤压缩（Selective Context）](https://arxiv.org/abs/2304.12102) | 纯自信息/困惑度过滤对代码语义风险高（低困惑度标识符承载语义）、无编码基准、论文自认结论任务依赖 |
+| [以 AST 为程序表示做迭代式上下文检索 + 谱系（spectrum-based）故障定位收窄上下文](https://arxiv.org/abs/2404.05427) | 2024 年基线已过时（作者自承）、AST+谱系定位路线已由 LocAgent(S012)/repo map(S010) 承载、依赖可用测试套件 |
+| [静态分析（文件级依赖）注入流水线的阶段选择：注入 prompt 阶段优于后处理阶段](https://arxiv.org/abs/2406.10018) | 代码补全任务而非 agent 端到端改码、CrossCodeEval 仓库规模远小于生产 monorepo、迁移需重新验证 |
+| [跨文件上下文检索：迭代式「检索-生成」闭环 + 专门的跨文件上下文查找器](https://arxiv.org/abs/2303.12570) | 补全任务（RepoEval 小仓库）、2022-23 骨干模型过时、迭代检索与仓库级检索条目(S010/S012)重叠 |
+| [代码库知识图要用 AST/tree-sitter 确定性构建，不要用 LLM 抽取（GraphRAG 式索引在代码上性价比差）](https://arxiv.org/abs/2601.08773) | 单作者预印本、每仓仅 15 条查询、Java-only、统计效力有限；「AST 建图优于 LLM 抽图」可由 S010/S165 佐证 |
+| [用 tree-sitter 构建持久化代码知识图并通过 MCP 暴露给 agent（可跨 agent 复用）](https://arxiv.org/abs/2603.27277) | 质量换 token 的 trade-off 未决（83% vs 92%）、10 页预印本、开源实现与论文一致性未核；共享索引思想由 S010/S165 承载 |
+| [把 LSP 语义能力（符号概览、定义/引用、类型层级、跨文件重命名与移动）作为 agent 的符号级工具](https://github.com/oraios/serena) | 官方自评（agent 自评无第三方对照）、单仓库样本、每种语言需装 language server 成本高、动态语言上 LSP 常不可靠 |
+| [把「仓库探索」单独做成基准来评估（覆盖 / 排序 / 上下文效率三轴），而不是只看最终 patch 对不对](https://arxiv.org/abs/2606.07297) | 评测协议而非可上线策略、行级 ground truth 由成功轨迹蒸馏（隐含「被查阅即有用」假设）；其指标已并入 S015 的评测设计 |
+| [Cursor 项目规则（.cursor/rules + .mdc + globs 条件注入）](https://cursor.com/docs/context/rules) | 四档触发与 S018 的 path-scoped rules 机制同构、官方无任何对照数字、description 语义选取跨模型不可比 |
+| [Zep/Graphiti 时序知识图谱记忆（边带时间戳 + 失效推理）](https://arxiv.org/abs/2501.13956) | 对话域数字（LongMemEval/DMR）、Mem0/Zep/Letta 三方互斥争议已在 S020 的 notes 中完整保留 |
+| [Agent Workflow Memory（AWM：从历史轨迹归纳可复用 workflow）](https://arxiv.org/abs/2409.07429) | Minecraft 域数字（3.3x 等）不可外推到编码；可执行代码即技能的思想已并入 S048 渐进披露条目的 notes |
+| [Voyager 技能库：可执行代码作为程序性记忆](https://arxiv.org/abs/2305.16291) | web 导航域数字、经验复用由 S023（含 SWE-bench Verified 成绩）与 S024 承载；AWM 加失败数据反降的负结果已在 S023 notes |
+| [ExpeL：经验蒸馏为 insights + 任务相似度轨迹检索](https://arxiv.org/abs/2308.10144) | 非编码域（HotpotQA/ALFWorld）、经验蒸馏家族已被 S023/S024 覆盖；「混入反思文本有害」负结果已在 S022/S023 notes |
+| [Devin Memory + Dreaming：Git 仓库记忆 + 每日整理](https://docs.devin.ai/product-guides/memory) | 无任何量化评估（官方文档定性）、记忆类已有 S003/S021/S024/S025 多条强证据条目；「只影响未来会话」设计点已并入 S003 notes |
+| [多 agent 之间用同步事件驱动消息传递替代「共享上下文」（icat-agent）](https://arxiv.org/abs/2606.25514) | 增益部分来自按 issue 质量分流工作流而非纯消息机制、SWE-bench Pro 商业集不可复现；事件驱动 vs 共享上下文的负面教训由 S145 承载 |
+| [探索型子 agent 上下文隔离与减载（内置 Explore/Plan 不装载 CLAUDE.md 与 git status 快照）](https://code.claude.com/docs/en/sub-agents) | 与 S004 子代理隔离主条目高度重叠（同文档机制细节）、纯官方经验无数字 |
+| [子 agent 能力面收敛：tools/disallowedTools 白黑名单 + 后台 agent 内置工具裁剪 + 嵌套类型白名单](https://code.claude.com/docs/en/sub-agents) | 与 S038 编排配额同文档重叠、纯机制描述无数字；工具面收敛思想并入 S038 测试设计 |
+| [双层上下文节流：hook 侧预处理工具输出 + auto-compact 定制与抖动保护](https://code.claude.com/docs/en/costs) | 与 S002（context editing）和 S042（hooks）重叠、量级数字为文档口径非严格基准 |
+| [auto memory：agent 自写持久记忆，MEMORY.md 索引 + 主题文件，启动只载前 200 行/25KB 并自动裁剪](https://code.claude.com/docs/en/memory) | Claude Code 产品机制细节、与 S003 memory tool 同主题；200 行/25KB 注入阈值可并入 S003 测试参数 |
+| [多 agent 团队编排：共享任务表 + 任务依赖 + 认领文件锁 + 邮箱互发 + 规模经验值（3–5 队友、约 7× token）](https://code.claude.com/docs/en/agent-teams) | 实验特性默认关闭、90.2%/15× 等数字已由 S004 承载、官方自列多项已知缺陷；共享任务表+文件锁设计点并入 S132 测试设计 |
+| [事件溯源式 agent 循环：强类型 append-only 事件流作为唯一记忆与集成点](https://docs.openhands.dev/sdk/arch/events) | 架构机制条目、官方无失败率对照数字；断点续跑/轨迹审计由 S154(checkpoints)+S120(YAML 配置化) 承载 |
+| [Microagents/Skills 关键词触发式知识注入 + repo 级常驻上下文，两级分离](https://docs.openhands.dev/overview/skills) | grade=none、与 S019/S080 重叠；关键词触发在全自动场景命中率存疑（只扫 user 消息） |
+| [Warm sandbox pool 沙箱预热池：后台预初始化、会话到达时晚绑定](https://docs.openhands.dev/cookbook/warm-sandbox-pool.md) | 与 S045（镜像分层缓存）和 S043 重叠、数字来自官方 cookbook 小服务演示、有镜像漂移风险 |
+| [云端远程 runtime 并行评测：32 路并发、30x 提速、prompt caching 把单问题成本压到 $0.003](https://openhands.dev/blog/evaluation-of-llms-as-coding-agents-on-swe-bench-at-30x-speed) | 官方博客口径（30x 对比其自有旧基线）、$0.003 依赖当时 DeepSeek 定价与缓存命中率；并行基建结论由 S045+S167/S168 承载 |
+| [网页工具双层设计：web_read（转 markdown 读取）优先，browser（BrowserGym 15 动作）仅交互时启用](https://pypi.org/project/openhands-ai/0.39.0/) | 浏览器工具非大型仓库编码核心环节、grade=none、浏览器通道引入 Playwright 依赖成本不低 |
+
+**分片 B（工具/执行/技能）（32 条）**
+
+| 候选策略 | 剔除理由（节选） |
+|---------|----------------|
+| [技能瘦身：路由描述不可省，正文只留可执行规则（less-is-more）](https://arxiv.org/abs/2603.29919) | +2.8% 属小效应、「60% 正文不可执行」口径由论文自定义分类器判定；与 S050/S177 技能组织研究重叠 |
+| [依赖感知（反向遍历）检索技能包，而非只按语义相似度取 top-k](https://arxiv.org/abs/2604.05333) | SkillsBench 域、现实技能少有显式依赖声明（图构建质量是瓶颈）；技能检索已由 S052（IR 路线）承载 |
+| [把技能触发率当成一等指标来测：正例+近似负例查询集 × 多次重复 × 训练/验证拆分](https://agentskills.io/skill-creation/optimizing-descriptions) | 纯方法论无官方数字、依赖特定客户端 Skill 调用日志；触发率作为一等指标已由 S177（实证 +0.23 动作触发）承载 |
+| [用真实大仓漏洞做技能有效性评测：失败驱动的技能进化（SKILL-SIF）](https://arxiv.org/abs/2610.25705) | 漏洞定位任务定义与功能开发不同、「8 倍」是 2%→16% 低基数放大；技能评测台设计由 S160 承载 |
+| [用执行轨迹诊断缺陷并自动修订技能（trace-conditioned revision）](https://arxiv.org/abs/2606.01139) | SkillsBench 低起点（36%→62%）、修订预算额外 token、与 S163（成本侧技能设计）/S177（技能修订实证）主题重叠 |
+| [插件/markethouse 作为分发与版本化单元，但按「每轮上下文成本」计费来准入](https://docs.claude.com/en/docs/claude-code/plugins) | 机制与生态统计、无对照实验；「按技能级而非按包准入」的思想已并入 S049 的测试设计 |
+| [采用 MCP 标准协议接入外部工具生态，换取连接器复用与跨模型可移植性](https://www.anthropic.com/news/model-context-protocol) | 协议/生态采用事实而非可测策略、无对照数字；MCP 接入的效果面由 S043/S055/S058 承载 |
+| [检索式工具选择：先语义检索再注入相关工具（RAG-MCP）](https://arxiv.org/abs/2505.03275) | 与 S055（Tool Search Tool + PTC）同策略、官方条目已含 token 与准确率双收益数字 |
+| [主动式工具发现：由模型自主请求工具而非被动接收（MCP-Zero）](https://arxiv.org/abs/2506.01056) | APIBank 非编码基准、多轮主动发现增加交互轮数与延迟、对固定 SWE 流程静态精简集合可能更稳 |
+| [约束解码保证工具调用语法合法（ToolDec）](https://arxiv.org/abs/2310.07075) | 2023 弱模型时代结论（0%→52%）、现代旗舰模型语法错误已少见、FSM 需与 schema 同步维护成本随工具数上升 |
+| [以有状态 MCP 基准（MCPMark）校准工具编排能力上限](https://arxiv.org/abs/2509.24002) | SaaS CRUD 域任务、与 S058（MCP-Universe）同为工具编排验收集、保留含 Cursor-vs-ReAct 负结果的后者 |
+| [以宽覆盖工具池基准（MCP-Bench）压力测试工具选择与多跳编排](https://arxiv.org/abs/2508.20453) | abs 页无分数数字、需运行在线 MCP server 基建成本高；宽覆盖工具池压测可后续到仓库核对后再收录 |
+| [工具集作用域控制：按角色/阶段白名单暴露工具子集（GitHub 官方 MCP server 范式）](https://github.com/github/github-mcp-server) | 静态白名单工程实践、与 S055 检索式披露重叠、任务-工具映射需人工维护 |
+| [量化 MCP 包装层的 token 与延迟开销并在自有负载复测](https://www.reddit.com/r/ClaudeAI/comments/1rzz784/mcp_is_costing_you_37_more_tokens_than_necessary) | 社区非对照测量、口径未经同行评审（原条目已自标低可信度）、方向已被 S043/S055 覆盖 |
+| [两段式落盘：强模型只负责产出方案/编辑意图，交给更便宜的编辑模型负责把改动落成文件](https://aider.chat/2024/09/26/architect.html) | 2024 练习题基准、强模型独立编辑能力上来后两阶段收益消失甚至为负（R1/o3 反例）；编辑解耦的现代证据由 S173（SWE-Edit）承载 |
+| [编辑工具的报错信息要给「定位 + 上下文 + 可执行的下一步」，而不是裸报错（现有公开实现存在明显缺口）](https://raw.githubusercontent.com/SWE-agent/SWE-agent/main/tools/windowed/lib/windowed_file.py) | grade=none、issue 计数只证明问题高频不能证明增强报错的收益；与 S062（lint 门禁回显）环节相邻 |
+| [无标签的 harness 自演化（用 LLM 生成测试替代 ground truth），按性能-成本 Pareto 选版本](https://arxiv.org/abs/2610.26770) | 与 S131（AHE）/S069（HarnessAdapt-RL）同主题、+2.0pp 增益小且依赖 LLM 生成测试作无标签判据 |
+| [把编辑变成模型原生的生成语法（上下文内编辑），减少外部编辑工具与格式契约的依赖](https://arxiv.org/abs/2610.25550) | 需要训练（编辑语法特殊 token）、非 harness 层即插即用改动；与「JSON 包代码有害」等结论可能冲突需重验 |
+| [前端/网站任务用 UI 自动化测试做执行反馈（浏览器导航 agent 验收生成结果）](https://arxiv.org/abs/2505.03733) | 前端网站生成任务、导航 agent 判定有噪声、非大仓编码核心环节 |
+| [浏览器截图视觉反馈循环（渲染→截图→自检→改），用于前端任务](https://www.anthropic.com/engineering/claude-code-best-practices) | 前端截图循环无数字（Anthropic 博客为定性推荐）、DesignBench 数字测的是单次修复而非截图循环、视觉 token 成本高 |
+| [可执行环境基建：每任务预构建 Docker 镜像+持续新鲜任务流（跑了再改的前提）](https://arxiv.org/abs/2505.23419) | 与 S147 为同一论文（SWE-bench-Live）、保留评测分层策略条目；环境供给由 S045/S073/S167 承载 |
+| [权限分级：只读探索（plan mode）先行、写操作显式升级](https://code.claude.com/docs/en/permissions) | 与 S040（四阶段 plan mode）和 S081（沙箱×审批分档）重叠、纯权限机制无数字 |
+| [Repo map 开销控制：磁盘 tags 缓存 + 动态 token 预算（1k 默认、无文件时×8）+ 地图二分拟合与结果缓存](https://github.com/Aider-AI/aider/blob/main/aider/repomap.py) | 纯工程缓存实现细节（mtime 缓存/二分拟合）、无对照数字、与 S010 同源 |
+| [弱模型（weak model）分工：commit message 与历史摘要交给廉价模型，摘要放后台线程](https://github.com/Aider-AI/aider/blob/main/aider/models.py) | 辅助任务（commit message/摘要）降级属常识性成本优化、无对照数字、编码质量路径外 |
+| [聊天历史自动摘要：保尾半预算切分 + 头部递归摘要（depth≤3）+ 后台异步](https://github.com/Aider-AI/aider/blob/main/aider/history.py) | 又一压缩实现默认值（保尾+头部摘要）、压缩家族已由 S001/S082/S155 多家覆盖、阈值 1024 为 2023 交互经验值 |
+| [规则分四档触发（alwaysApply / globs 自动挂载 / description 语义选取 / @手动）且规则正文只放「指针」不放内容](https://cursor.com/docs/context/rules) | 与 shard A Cursor rules 条目同被剔除：四档触发与 S018 path-scoped rules 同构、无对照数字 |
+| [LLM 风险分级审批审阅者：异步非阻塞首审 + 高风险才触发阻塞复审（Guardian 两级）](https://github.com/openai/codex/blob/c419fd01a70dd1d05356da443ac44328bda2e6f4/codex-rs/prompts/templates/guardian/classifier_instructions.md) | 与 S081（沙箱×审批）和 S042（hooks 硬闸门）重叠、LLM 审阅器自身可被提示注入、无任何官方消融 |
+| [声明式工具执行策略引擎：TOML 规则（toolName / argsPattern 正则 / commandPrefix / decision / priority）](https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/policy-engine.md) | 与 S042 hooks 的「确定性硬闸门」角色重叠、argsPattern 正则随序列化格式静默失效（作者自认） |
+| [上下文分段化 + 差分替换：常驻上下文按 section ID 维护，变了才重发且用「替换旧值」语义](https://github.com/openai/codex/blob/c419fd01a70dd1d05356da443ac44328bda2e6f4/codex-rs/core/src/context/world_state/mod.rs) | 本清单工程量最大、无任何效果数字、append-only/稳定前缀原则已由 S007/S168 覆盖 |
+| [子 agent 上下文继承二选一（none / full-history fork）+ 角色配置层裁剪能力与换模型](https://github.com/openai/codex/blob/c419fd01a70dd1d05356da443ac44328bda2e6f4/codex-rs/core/src/tools/handlers/multi_agents_v2/spawn.rs) | fork 语义（fork_turns none/all）已并入 S004 子代理隔离主条目、角色裁剪细节属实现层 |
+| [以代码定义的多 agent 编排工作流：步骤可并行、子 agent 互验、结构化输出契约、checkpoint 人审、CLI 可 CI 化](https://docs.github.com/en/copilot/concepts/agents/dynamic-workflows) | 产品文档机制、无数字、代码化编排思想与多条多agent编排条目重叠 |
+| [执行环境作为一等公民：预构建环境/快照/容器 + 仓库路径在宿主与沙箱内绝对路径对齐](https://cursor.com/docs/background-agent) | 与 S045（Docker 缓存）/S073（每任务沙箱）重叠、无数字、预构建环境漂移风险自认 |
+
+**分片 C（单体循环与扩展）（21 条）**
+
+| 候选策略 | 剔除理由（节选） |
+|---------|----------------|
+| [Self-Refine：纯语言自评迭代精修（无外部执行信号）](https://arxiv.org/abs/2303.17651) | 软正确性指标域（可读性/优化）经典、其负结果（prompt 归因/数学零增益/CRITIC 引用 -44.6）已在 S071/S085 notes 保留 |
+| [准确率-纠错悖论 / 错误深度假说：更强的模型纠错率反而更低](https://arxiv.org/abs/2601.00828) | 346 个错误样本、仅数学任务、0 引用新论文；「位置提示有害」可并入 S088/S109 的测试设计 |
+| [自精修流水线的阶段容量不对称：critic 可以小，修订器不能小](https://arxiv.org/abs/2608.21345) | 5 基准小研究、0 引用、非仓库级任务；critic 可小/修订器不能小的结论并入 S105 的模型分配测试 |
+| [中间运行时证据优于 outcome-level 报错（自定向调试式修复）](https://arxiv.org/abs/2604.19305) | Defects4J APR 域、对照基线口径待查正文；「喂中间运行时状态」的反馈设计已由 S070/S103 承载 |
+| [生成判别输入的混合测试时扩展（并行+串行采样 + 执行落地验证）](https://arxiv.org/abs/2502.14382) | LiveCodeBench 函数级、无 SWE-bench 数字；「生成判别测试选优」已由 S099（CodeT）/S101（Otter）承载 |
+| [顺序测试时计算扩展：轨迹合成 + 决策点 reward/执行验证](https://arxiv.org/abs/2503.23803) | 需轨迹合成与拒绝采样训练基建、复现成本高；TTC 结论已由 S091/S092（官方档位）承载 |
+| [多评委集成评审（LLM-as-ensemble-judge）用于候选选优](https://arxiv.org/abs/2505.20854) | 定位是离线评测指标而非在线选优器、评委成本随候选数线性增长；judge 家族已有 S105/S106/S107 更贴合产线 |
+| [温度自适应/混合温度采样提升 pass@k 多样性](https://arxiv.org/abs/2309.02772) | 摘要页无绝对数字（本轮未读正文）、函数级任务、长轨迹高温风险自认 |
+| [扩展交互而非加长思考（test-time interaction scaling）](https://arxiv.org/abs/2506.07976) | web agent 域（WebVoyager/WebArena）、无编码数字、方向与 S095 同向 |
+| [仓库级代码补全的训练无关 test-time scaling（含纯语言『读后打分』选择器）](https://arxiv.org/abs/2610.04837) | 仓库级补全任务（轻于修 bug）、模型 ≤7B、0 引用；「读后 likelihood 自评」与 S086 锚定风险相关需单独验证 |
+| [LATS：MCTS 工作线并行探索 + LM 价值函数打分 + 自反思引导回溯](https://arxiv.org/abs/2310.04406) | 2023 年模型成绩（92.7%）、每节点一次完整轨迹成本放大数十倍、实现复杂度高；树搜索已由 S094/S098 承载 |
+| [Tree of Thoughts：多条思路分支并行生成、同模型互评与择优](https://arxiv.org/abs/2305.10601) | 非编码域经典（Game of 24）、真实仓库瓶颈在定位与上下文而非推理深度、LLM 自评剪枝可靠性有限 |
+| [Self-Consistency：并行采样多条解 + 多数投票收敛](https://arxiv.org/abs/2203.11171) | 答案投票范式（GSM8K）、编码域等价物（测试投票）已由 S094/S099/S142 承载 |
+| [按需规划：规划是有开销的可选前置，按任务不确定性分级触发](https://code.claude.com/docs/en/best-practices) | 官方经验无数字、按需门控思想已由 S109（21,120 轨迹消融）与 S040 承载 |
+| [层次化阶段计划 + 情节记忆双向耦合（含卡住检测触发的重规划，PMCoder）](https://arxiv.org/abs/2608.06811) | harness-matched 单一设置 +5.0pp、样本有限；规划-记忆耦合思想由 S110（STAIR）与 S109 承载 |
+| [仓库级自适应计划链（每步带依赖分析与影响面分析的编辑序列，CodePlan）](https://arxiv.org/abs/2309.12499) | 2023 年弱模型、6 个仓库小样本、静态依赖分析实现成本高；仓库级规划已由 S109/S110/S040 承载 |
+| [规则化（而非 LLM 自主）的规划工作流骨架（PatchPilot）](https://arxiv.org/abs/2502.02747) | 与 S011（Agentless 固定管线）/S040（四阶段）主题重叠、正文逐项消融数值未充分核验 |
+| [模块化分解：按目标不同实例化专职子代理，缩短单轨迹长度（MASAI）](https://arxiv.org/abs/2406.11638) | 2024 年弱模型基线、分解-委派架构已由 S004/S112/S113 承载；「短轨迹」经济性论点并入 S112 notes |
+| [filemap：tree-sitter 结构化折叠，打印文件时省略长函数体并标注省略区间](https://github.com/SWE-agent/SWE-agent) | grade=none、Python-only（自认假设）、与 S010（repo map）/S118（窗口查看）重叠 |
+| [报错设计：区分格式解析失败与输出截断两类反馈，格式错误给两轮自我修正窗口](https://swe-agent.com/latest/config/templates/) | grade=none、文档化默认行为而非被验证的改进；错误反馈设计已由 S062（lint 回显）部分承载 |
+| [评测口径设计：pass@k / pass^k 双指标与采样次数](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents) | 与 S079（aider 两段式计分+格式符合率+遥测）方法论重叠、pass^k 概念并入统一测试设计 |
+
+**分片 D（多 agent 与评测）（46 条）**
+
+| 候选策略 | 剔除理由（节选） |
+|---------|----------------|
+| [对 harness 做「多模型 × 多 harness」矩阵评测，把 harness–模型配对作为报告单位而非只报模型名](https://arxiv.org/abs/2605.27922) | 摘要无具体分差、沙箱离线任务非真实大仓；「配置级报告」思想由 S125/S126/S127/S151 承载 |
+| [厂商官方经验：把 harness 层的「工具/上下文/流程」当产品级资产来经营](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) | 厂商实践综述、无对照数字、各具体机制均已单列；OpenAI harness-engineering 制品化思想并入 S080 notes |
+| [多 harness 强化学习：判断 harness 差异是否大于训练差异](https://arxiv.org/abs/2609.04518) | 8B 模型规模、结论绑定 RL 归一化细节、不能套到生产级模型 |
+| [失败归因到 harness 边界的交互式失败分类法（先定位再修）](https://arxiv.org/abs/2607.28802) | 纯分类框架、无分布/收益数字、与 S141（MAST 失败分类）重叠 |
+| [LLM 级联：先弱后强、按预算自动选模型组合（FrugalGPT）](https://arxiv.org/abs/2305.05176) | QA/短文本数据集、级联思路已由 S134（轨迹级路由）/S135（投机执行）在 agent 场景具体化 |
+| [偏好数据训练路由器（RouteLLM）](https://arxiv.org/abs/2406.18665) | 训练分布为一次性 Arena 对话、one-shot 路由有 Bayes 下界（同作者后续工作即 S134） |
+| [基于弱模型隐状态不确定性的弱→强升级与「牵绳式」监督（LEASH）](https://arxiv.org/abs/2610.22280) | OSWorld computer-use 域、shadow observer 在闭源黑盒 API 下基本不可用（作者自认）；升级机制由 S134 承载 |
+| [多层投机执行：小模型预测多步动作骨架、大模型按骨架批量提交（SMC / PASTE / Speculative Actions）](https://arxiv.org/abs/2609.03236) | 延迟优化为主且有小幅质量代价（AppWorld）、动作预测天花板 55%、与 S135 同族重叠 |
+| [失败后的恢复路由：先花便宜算力再修，还是直接升级到强模型（CodeRescue）](https://arxiv.org/abs/2607.19338) | CRC 依赖 exchangeability 假设、多项目混合分布下校准点会漂移（作者自认）；「便宜重试 vs 升级」假设可由 S134 臂设计覆盖 |
+| [上下文条件化的能力画像 + 风险感知打分做下放决策（CADMAS-CTX）](https://arxiv.org/abs/2604.17950) | GPT-4o 单 agent 池、SWE-bench Lite 仅 300 题、上下文桶打标质量决定成败（消融自认） |
+| [按角色分派模型（谁规划、谁编辑）+ 工具签核兜底（Who Plans, Who Edits）](https://arxiv.org/abs/2610.24234) | 模拟电路版图域（LVS/DRC 签核）、分工结论与 S026/S159 重叠、整体花费反高 8% |
+| [Mixture-of-Agents：多层弱模型互为上下文、强模型不直接参与生成](https://arxiv.org/abs/2406.04692) | 全部证据来自 AlpacaEval/MT-Bench（LLM-judge 偏好评测）、无编码基准、all-to-all N×M token 成本 |
+| [官方 harness 的强模型主控 + 弱模型 subagent 分工（Claude Code）](https://code.claude.com/docs/en/sub-agents) | 官方经验配置无数字、按子任务类型分档的收益证据由 S159（GAIA +5.67pp）承载 |
+| [弱模型监控强模型（weak-to-strong monitoring）](https://arxiv.org/abs/2508.19461) | 隐蔽行为检测域（SHADE-Arena）、监控器迁移到编码需重训、审查独立性证据链已由 S105/S107/S144 承载 |
+| [共享消息池 + 角色订阅（黑板式结构化通信，替代点对点消息传递）](https://github.com/FoundationAgents/MetaGPT/blob/main/metagpt/roles/engineer.py) | 与 S137（MetaGPT SOP 结构化产物交接）同源同主题、pub-sub 实现细节可并入其 notes |
+| [通信拓扑剪枝降低消息开销（AgentPrune）](https://arxiv.org/abs/2410.02506) | 面向显式消息传递图拓扑、与本项目黑板/文件/worktree 协调机制不适配 |
+| [A2A agent 间互操作协议（跨厂商/跨框架标准层）](https://github.com/a2aproject/A2A) | 无性能证据（只有采用度生态数字）、跨组织互操作对内部产线非核心链路、协议组件对内部场景过重 |
+| [合并卫生门禁：以代码重复率为并行产线的合并质量指标](https://www.gitclear.com/ai_assistant_code_quality_2025_research) | 观测性相关证据（211M 行）、把重复归因于 AI 是相关性论证无对照；克隆门禁指标可并入 S146 测试设计 |
+| [pass@k 无偏估计与 pass@1/coverage 双指标](https://arxiv.org/abs/2107.03374) | 与 S091（Monkeys 覆盖曲线）/S079（方法论包）重叠、无偏估计量属通用教科书方法 |
+| [终端环境基准 + 中性参考 harness 分离模型与框架效应](https://arxiv.org/abs/2601.11868) | TB2.0 已由 S037 收录、中性参考 harness 思想并入 S126/S133 的对照设计 |
+| [固定预算下的开放式任务评测（Score@k 与人类专家基线）](https://metr.org/blog/2024-11-22-evaluating-r-d-capabilities-of-llms/) | 开放式 ML 研发任务（kernel/scaling law）、仅 7 环境、离大仓 SWE 远 |
+| [Plan/Act 双模式拆分 + 分模式模型路由（只读规划与执行解耦）](https://github.com/cline/cline/blob/main/docs/core-workflows/plan-and-act.mdx) | 与 S040（四阶段）重叠、官方遥测是使用率而非消融成绩、小任务直接 Act 更好官方自认 |
+| [模式即角色：内置角色分工 + 每模式工具组与文件白名单](https://github.com/RooCodeInc/Roo-Code/blob/main/packages/types/src/mode.ts) | grade=none、模式=角色的机制与 S042/S038/S159 重叠、无公开对照 |
+| [Orchestrator 上下文隔离（Boomerang 子任务：只传摘要不传过程）](https://github.com/RooCodeInc/Roo-Code/blob/main/apps/docs/docs/features/boomerang-tasks.mdx) | 与 S004（隔离+摘要回传）重叠、纯机制描述无数字 |
+| [Memory Bank：结构化项目记忆文件层（跨会话/跨 agent 项目知识）](https://github.com/cline/cline/blob/main/docs/best-practices/memory-bank.mdx) | 纯提示词+文件约定、无数字、与 S003/S021/S030 记忆类条目重叠、全读 memory bank 有固定 token 开销 |
+| [按模型路由编辑工具：GPT/Codex 系走 apply_patch，其余走整文件 editor，一个会话只给其一](https://github.com/cline/cline/blob/main/sdk/packages/core/src/extensions/tools/model-tool-routing.ts) | 与 S065（编辑格式路由）主题重叠、grade=none、modelId 子串匹配脆弱 |
+| [双层上下文压缩：滚动 agentic summary + 确定性截断 + 预算投影](https://github.com/cline/cline/blob/main/sdk/packages/core/src/extensions/context/agentic-compaction.ts) | 压缩默认值家族已由 S001/S082 覆盖、增量（跨模型不压缩/文件清单）可并入其测试设计 |
+| [Plan 模式 shell 命令黑名单（command guard）](https://github.com/cline/cline/blob/main/sdk/packages/core/src/extensions/tools/command-guard.ts) | 与 S042 hooks 门禁机制重叠、grade=none、黑名单自认可被 python -c 绕过 |
+| [spawn_agent 并行子代理：独立上下文做预调研，回传报告](https://github.com/cline/cline/blob/main/docs/features/subagents.mdx) | 与 S004（探索型子代理 fan-out）重叠、无对照数字、小任务 fan-out 纯开销官方自认 |
+| [工具输出确定性限额与批量读文件](https://github.com/cline/cline/blob/main/sdk/packages/core/src/extensions/tools/executors/output-limits.ts) | 常量限额属工程默认、与 S083（输出外置）/S002 重叠、grade=none |
+| [执行反馈闭环：工具结果反思开关 + LLM 裁决「该不该重试」](https://github.com/microsoft/autogen/blob/main/python/packages/autogen-agentchat/src/autogen_agentchat/agents/_code_executor_agent.py) | grade=none、默认保守开关（False/0）、无任何基准数字 |
+| [把「写码/执行/审查」拆成不同 agent，审查与实现相互独立](https://arxiv.org/abs/2308.08155) | 2023 OptiGuide 场景（约束优化代码）、「F1 +8%/35%」未给绝对分口径；审查独立性证据链已由 S105/S107/S144 承载 |
+| [强制交付契约（结构化 final answer / 产物格式）](https://github.com/microsoft/autogen/blob/main/python/packages/agbench/benchmarks/GAIA/Templates/MagenticOne/scenario.py) | 机制细节无数字、交付契约思想由 S105/S150/S156 评测条目承载 |
+| [AutoGenBench：每任务全新容器的隔离式可重复评测基座](https://github.com/microsoft/autogen/tree/main/python/packages/agbench) | 官方已标记 deprecated、每 trial 全新容器的隔离思想由 S045/S156 承载 |
+| [上下文裁剪与状态快照/断点恢复（buffer + save_state/load_state）](https://microsoft.github.io/autogen/stable/user-guide/agentchat-user-guide/migration-guide.html) | API 用法事实无数字、与 S157（重规划清零）方向相反需拆开测、截断丢失推理链风险自认 |
+| [编排器升级：重规划预算上限（max_reset_count）+ 计划评审 + 停滞人工介入 + 检查点](https://github.com/microsoft/agent-framework/blob/main/python/packages/orchestrations/agent_framework_orchestrations/_magentic.py) | 与 S139/S157 重叠、API 与默认值事实无数字、全自主场景 plan review 会成吞吐瓶颈 |
+| [复用成熟 coding harness 作执行引擎 + 逐能力权限网关](https://devblogs.microsoft.com/agent-framework/build-production-ready-agents-with-the-github-copilot-harness-and-agent-framework/) | 产品公告+代码样例、未跑通端到端、依赖 Copilot 订阅授权 |
+| [决策账本 + 技能沉淀 + 每 agent 上下文隔离（Squad 式自学习团队）](https://github.com/bradygaster/squad) | 社区项目无基准、README 机制未经第三方复现、与 S003/S030 记忆类条目重叠 |
+| [可执行反馈迭代调试：写码后真跑 + 单测，失败自动进修复回路（限次重试）](https://arxiv.org/abs/2308.00352) | 与 S070（Self-Debugging 执行反馈回路）主题重叠、GPT-4 时代函数级数字 |
+| [任务级预算与轮次双闸门：美元预算上限 + 空闲/轮次终止](https://github.com/FoundationAgents/MetaGPT/blob/main/metagpt/team.py) | 机制平凡（任务级 $ 硬上限）、grade=none、预算治理已由 S084（会话树加权预算）承载 |
+| [Experiential Co-Learning：把历史轨迹编译成任务执行图，抽取「捷径」经验跨任务复用](https://arxiv.org/abs/2312.17025) | SRDD 玩具域（1200 小游戏任务）、与经验复用家族（S023/S024）重叠、需防经验库中毒 |
+| [MacNet：用 DAG 拓扑组织多 agent，规模超千而不爆上下文](https://arxiv.org/abs/2406.07155) | 逻辑推理/故事生成等非编码任务、logistic 拐点提示盲目加 agent 会亏、编码收益未单独证明 |
+| [Puppeteer：RL 训练中央编排器，动态决定唤醒/排序哪些 agent](https://arxiv.org/abs/2505.19591) | 摘要无数字、正文未核验、RL 训练编排器成本高 |
+| [AFlow：把工作流表示为代码图，用 MCTS + 执行反馈自动搜索最优编排，替代手写 SOP](https://arxiv.org/abs/2410.10762) | 基准以推理/问答为主（编码占比未说明）、MCTS 搜索要烧大量评估调用、工作流搜索思想由 S131 部分承载 |
+| [Data Interpreter：单体 agent 的层次图任务分解 + 可编程节点迭代精炼](https://arxiv.org/abs/2402.18679) | 数据科学基准（InfiAgent-DABench）、纯 SWE 基准未报、图管理工程复杂 |
+| [标杆警示：两框架评测互相矛盾 + 维护断档，任何借鉴前先自建可复验评测](https://arxiv.org/abs/2503.13657) | 与 S141（MAST）同源重叠、评测纪律红线已由 S149/S150/S151 承载 |
+
+**补漏轮 1（1 条）**
+
+| 候选策略 | 剔除理由（节选） |
+|---------|----------------|
+| [多维度上下文剪枝（LaMR）：语义证据与依赖支撑分维度建模再融合](https://arxiv.org/abs/2605.15315) | 需训练 CRF+MoE 落地重、与上下文剪枝家族（S002/S016）重叠、摘要自认收益部分来自标签去噪而非剪枝 |
+
+**补漏轮 2（5 条）**
+
+| 候选策略 | 剔除理由（节选） |
+|---------|----------------|
+| [非前缀 KV 复用（CacheBlend/LMCache）：检索拼接的上下文不再全量重算 prefill](https://arxiv.org/abs/2405.16444) | 需自托管推理栈与 chunk 级改造、闭源 API 无等价物；前缀缓存主杠杆已由 S167/S168 承载 |
+| [重构感知语义合并器（IntelliMerge）：消解重构导致的伪冲突](https://github.com/Symbolk/IntelliMerge) | Java-only、2022 年独立再评估显示仅 24% 场景真正消解冲突且 30% 场景反增冲突 LOC、图构建开销大 |
+| [实体级合并驱动器（weave）：tree-sitter 按函数/类实体做三方合并](https://github.com/ataraxy-labs/weave) | 31/31 为项目自报基准无第三方复现、与 S146（Merge-Bench）/S171/S172 重叠、同名异义场景仍失败 |
+| [意图宣告 + advisory lease 的冲突前置检测（Foremerge：符号级 replace/extend 冲突在写码前暴露）](https://github.com/naw103/foremerge) | 单人维护项目、纯作者自述（Show HN）、数字不可采信；intent 宣告模式可并入 S172 测试设计 |
+| [用多 agent 协同编码基准（MultiAgentBench/MARBLE）给合并策略做里程碑级横评](https://aclanthology.org/2025.acl-long.421.pdf) | 中小型任务场景非真实大仓、协作质量分依赖 LLM judge 主观性、只宜作中间诊断层 |
+
+**补漏轮 3（1 条）**
+
+| 候选策略 | 剔除理由（节选） |
+|---------|----------------|
+| [把「编辑格式选择」从静态 model→format 路由表改成按任务学出来的自适应策略（局部改动用 find-replace，重构用整文件重写）](https://arxiv.org/abs/2604.26102) | 与 S065（编辑格式路由）同主题、增量是需要 GRPO 训练的自适应档、绝对增益仅 +0.5pp resolved（主要在成本 -11.8%） |
+
+### 6.2 存疑收录条目（引用前需修正或补核）
+
+全量口径（与执行摘要一致）：**完全一致 170、部分一致 4（S001/S005/S038/S041）、部分一致但未核实 1（S168）、不一致 3（S024/S101/S141）、未能核验 2（S149/S169），合计 180**。
+
+**链接失效（4 条）**——均为 openai.com 系域名反爬（403/Cloudflare），非条目本身错误：
+- S149（OpenAI 评测退役博客）：全部关键数字未能对源核实，仅保留「基准退役机制」方向性结论，引用禁止携带具体数字。
+- S168（prompt caching）、S169（batch API 五折）：机制部分经 OpenAI cookbook / 二手渠道核实，定价与折扣数字未核实；两者均可在自家账单直接实测。S168 的 claim 一致性为「部分一致（未核实）」，与上方全量口径对应。
+- S073（OpenAI Codex 沙箱）：一手页打不开，机制经二手报道佐证。
+
+**claim 与原文不符（3 条，K3 已给修正文案）**：
+- S024：「成本 +27.3%」是相对 Oracle Context Learning 臂（$0.98 vs $0.77）的增幅，非相对 No-Context 基线（应约 +24%），claim 未指明比较基准。
+- S101：测试过滤后精确率是落在 **65%–92% 区间**（召回 30%–41%），并非「从 65% 提到 92%」；单系统案例为 60.8%→91.9%。
+- S141：高频失败模式「类别—占比」错配——论文实际为：步骤重复 15.7%（最高频）、推理-行动不一致 13.2%、不知终止条件 12.4%、违反任务规范 11.8%（条目原文把占比安给了错误类别）。
+
+**部分一致（4 条：S001/S005/S038/S041；机制成立、细节需修正）**：
+- S001：OpenHands SDK condenser 默认参数随版本漂移（类默认 max_size=240/keep_first=2，工厂 default_condenser() max_size=80/keep_first=4），引用需注明版本。
+- S005：Opus 5 案例「任务相关/无关预填充」类型写反（衰减发生在任务相关预填充下）。
+- S038：fork 成本论点与版本号两处细节在线上文档无据。
+- S041：「明确不提供自动合并」一句在线上文档无明文。
+
+**C 级 7 条（证据不足或不可测，作参考不作依据）**：
+| 条目 | 定级原因 |
+|------|---------|
+| S020 Mem0 | 域外证据（LOCOMO 对话域）+ 编码域垫底反例 + 三方数字互斥 |
+| S026 Terminus-4B 下沉 | 来源已撤稿 + 内部基准 + 需自训管线 |
+| S047 StuckDetector | 机制经源码证实但零效果证据；作熔断器自证价值高 |
+| S069 HarnessAdapt-RL | 依赖 RL 设施、与自训模型强耦合，闭源 API 产线不可测 |
+| S108 提交前自审闸门 | 工程自评、零效果证据；值得自测的卫生闸门 |
+| S111 Don't Build Multi-Agents | 观点文章零实证；红线警示 |
+| S145 EventStream 异步事件流 | 官方架构回摆教训，无定量增益、A/B 成本高 |
+
+## 附录：方法学
+
+### A.1 调研流程
+1. **并行调研（26 路）**：按「上下文/记忆/长程、工具/执行/技能、单体循环与扩展、多 agent 与评测」四个主分片加多轮补漏，由 MiniMax-M3.1-Flash 与 GLM-5.3-Flash 两型模型并行完成候选条目采集与去重汇总。
+2. **合并主清单**：去重合并后形成 180 条收录条目 + 133 条剔除条目；每条收录条目含策略、大类、来源、链接、承诺改进（claim）、证据、初始证据等级（benchmark/ablation/anecdotal/none）、大型仓库相关性、测试设计、备注。
+3. **逐条独立验证（12 路，每路 15 条）**：由 Kimi K3 承担逐条核验与独立审读——对每条完成链接可达性核验、claim 与原文逐数字比对、三项 1–5 打分（证据强度 / 大型仓库价值 / 可测性）、A/B/C 定级、问题清单与修正建议；核验手段以 WebFetch 抓取原文（arXiv 摘要页/HTML 全文、官方文档、源码）为准；核验产出含**证据等级改判 15 条**（14 条明确改判 + S026 撤稿降级），已同步至第三节条目头与 A.3。
+4. **汇总交付**：本报告与 strategies.csv（180 行，与主清单一一对应）。
+
+### A.2 定级口径
+定级由 K3 逐条独立作出；三项打分是主要依据但**不是机械映射**。反向归纳 180 条的定级规律如下：
+- **A 级**（117 条）：通常是证据强度 ≥3 且大型仓库价值 ≥4 且可测性 ≥3；可测性=3 的条目几乎都另有证据强度 ≥4 或大仓价值=5 支撑——可直接进入 A/B 队列，测试设计已给出。
+- **C 级**（7 条）：通常是证据强度 ≤1（零对照证据/观点文/已撤稿——如 S047/S108/S111，即使大仓价值/可测性达 4–5 也直接落 C）；或证据强度=2 且大仓价值与可测性同时 ≤3（S020/S145）；或大仓价值 ≤3 且可测性 ≤2（S069，依赖 RL 设施、闭源 API 产线不可测）。
+- **B 级**（56 条）：其余——多为证据强度=2 的官方机制/经验描述（无对照数字），或大仓价值/可测性=3（证据域需迁移、落地成本高）；值得自测，不宜直接采信。
+- **已知边界案例（打分相同或相近而定级不同，说明 K3 还权衡了证据的可核验深度）**：① S096 与 S180 三项打分完全相同（3/4/3）：前者摘要级证据且标题引用有误定 B，后者全文表格数字逐格核实定 A；② S008（4/4/2）虽可测性=2，因证据强度与大仓价值双高定 B；证据一般且依赖训练设施的 S069（3/3/2）则定 C。按上述规律可复算 179/180，唯一例外即 ① 中的 S180。
+- **claim 一致性**：验证方将条目转述与原文逐数字比对后判定，分「一致 / 部分一致 / 部分一致（未核实）/ 不一致 / 未核验」五档；S168 为「部分一致（未核实）」（机制核实、定价未核实）；「未核验」均为来源域名反爬所致。
+
+### A.3 来源规模
+- 候选条目总量 313 条（收录 180 + 剔除 133）；收录条目证据等级分布（**K3 修正后**）：benchmark 91、ablation 53、anecdotal 33、none 3——合并清单原口径为 84/65/28/3；修正涉及 15 条（S045/S057/S073/S089/S093/S098/S134/S135/S151/S156/S157/S162/S164/S165 由 K3 明确改判，S026 因撤稿证据效力近零），已逐条标注于第三节。
+- 收录条目链接唯一域名 25 个：arxiv.org 121、github.com 12、anthropic.com/claude 系官方 19（含 code.claude.com 7）、aider.chat 5、openhands.dev 3，其余为 OpenAI、Cognition、Chroma、Manus、agents.md 等厂商与标准站点。
+- 链接核验有效 176/180；条目转述与原文完全一致 170/180、部分一致 4（另有 1 条「部分一致但未核实」）、不一致 3、未核验 2。
+
+### A.4 使用说明
+- 本报告只引用外部 URL；策略编号（S001–S180）在全报告与 strategies.csv 之间保持一致，可作 A/B 实验登记的主键。
+- A 级 117 条的测试设计均为「单变量、同模型同任务同预算」格式，可直接翻译为产线实验工单；B/C 级条目进入实验前需先补齐证据（见第五节对照臂要求）。

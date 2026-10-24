@@ -1,0 +1,13 @@
+{
+  "batch_id": "drill-batch",
+  "run_count": 1,
+  "run_ids": [
+    "pydata__xarray-4075-a1"
+  ],
+  "event_count_total": 39,
+  "status_counts": {
+    "completed": 1
+  },
+  "merkle_root": "f594f6942183db0742d87d29799a8de8f2b8f029c003b8ff7fd2adda8b440741",
+  "merkle_algo": "rfc6962-style: leaf=sha256(0x00||ascii(events_sha256)), node=sha256(0x01||l||r), odd-promoted, over lexicographically sorted events_sha256 list"
+}

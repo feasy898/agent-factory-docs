@@ -1,0 +1,26 @@
+{
+  "timestamp": "2026-10-08T23:30:00Z",
+  "packages": [
+    {
+      "name": "meeting-minutes-skill",
+      "task_count": 8,
+      "task_ids": ["t01", "t02", "t03", "t04", "t05", "t06", "t07", "t08"],
+      "type_distribution": {"ability": 2, "boundary": 3, "trap": 3},
+      "sha256": "PLACEHOLDER_MEETING_MINUTES"
+    },
+    {
+      "name": "office-templates-skill",
+      "task_count": 8,
+      "task_ids": ["t01", "t02", "t03", "t04", "t05", "t06", "t07", "t08"],
+      "type_distribution": {"ability": 4, "boundary": 2, "trap": 2},
+      "sha256": "PLACEHOLDER_OFFICE_TEMPLATES"
+    },
+    {
+      "name": "hot-templates-skill",
+      "task_count": 8,
+      "task_ids": ["t01", "t02", "t03", "t04", "t05", "t06", "t07", "t08"],
+      "type_distribution": {"ability": 4, "boundary": 2, "trap": 2},
+      "sha256": "PLACEHOLDER_HOT_TEMPLATES"
+    }
+  ]
+}

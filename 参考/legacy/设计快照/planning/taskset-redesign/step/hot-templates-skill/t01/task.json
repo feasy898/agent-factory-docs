@@ -1,0 +1,28 @@
+{
+  "id": "t01",
+  "type": "ability",
+  "difficulty": "basic",
+  "instruction": "使用 hot-templates 技能，生成抖音口播爆款内容骨架（骨架.md + structure.json）到指定输出目录 <outdir>。",
+  "nonce_input": {
+    "platform": "dy",
+    "topic": "通勤时间管理",
+    "points": [
+      "前一天晚上定好三件要事",
+      "通勤路上只听行业播客不刷短视频",
+      "到公司先花10分钟写当日清单"
+    ]
+  },
+  "expected": {
+    "要素数": 6,
+    "filled_from_input_topic": [
+      "hook_3s"
+    ],
+    "filled_from_input_points": [
+      "value_1",
+      "value_2",
+      "value_3"
+    ],
+    "open_placeholders_total": 2
+  },
+  "design_note": "强裸模型通过率 ≤55%：裸模型会把 hook_3s 的冻结文本改写、把 value_i 的‘第一/二/三招：’前缀漏写、或把 CTA 的冻结文本改写成通用祝福。必须逐字节对齐 frozen-tokens.md。"
+}

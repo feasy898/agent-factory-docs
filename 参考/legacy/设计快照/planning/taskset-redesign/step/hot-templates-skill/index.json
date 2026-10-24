@@ -1,0 +1,14 @@
+{
+  "package": "hot-templates-skill",
+  "task_count": 8,
+  "tasks": [
+    {"id": "t01", "type": "ability", "difficulty": "basic", "title": "抖音口播全填充", "files": ["task.json", "brief.md", "rubric.md"]},
+    {"id": "t02", "type": "ability", "difficulty": "basic", "title": "小红书图文全填充", "files": ["task.json", "brief.md", "rubric.md"]},
+    {"id": "t03", "type": "ability", "difficulty": "basic", "title": "公众号文章全填充", "files": ["task.json", "brief.md", "rubric.md"]},
+    {"id": "t04", "type": "ability", "difficulty": "basic", "title": "短视频分镜表全填充", "files": ["task.json", "brief.md", "rubric.md"]},
+    {"id": "t05", "type": "boundary", "difficulty": "edge", "title": "四平台零卖点边界", "files": ["task.json", "brief.md", "rubric.md"]},
+    {"id": "t06", "type": "boundary", "difficulty": "edge", "title": "topic 特殊字符边界", "files": ["task.json", "brief.md", "rubric.md"]},
+    {"id": "t07", "type": "trap", "difficulty": "hard", "title": "五卖点截断", "files": ["task.json", "brief.md", "rubric.md"]},
+    {"id": "t08", "type": "trap", "difficulty": "hard", "title": "非法 platform 与空白 topic", "files": ["task.json", "brief.md", "rubric.md"]}
+  ]
+}

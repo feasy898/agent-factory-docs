@@ -1,0 +1,15 @@
+# ── 密钥安全（必排：活 JWT / 活 x-api-key，见 计划/研究组/密钥终扫-20261024.md §①-A）──
+参考/higress-minimax-design/
+
+# ── af 是独立 git 仓，单独镜像 github.com/Feasy898/af，不嵌入文档仓 ──
+af/
+
+# ── 大体积产物 / 会话数据（硬纪律 7：观测数据归 observability、归档归 ~/bench-data）──
+工具状态备份/
+.zcode/workflow-runs/
+.zcode/plans/
+__pycache__/
+*.log
+*.tar.gz
+
+# ── 单文件 >10MB 的杂件无 gitignore 语法可表达，入库前人工/工具把关 ──

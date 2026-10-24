@@ -1,0 +1,176 @@
+--- a/tools/mcode-dispatch.py
++++ b/tools/mcode-dispatch.py
+@@ -19,7 +19,8 @@
+ 资源纪律：mcode 并发 ≤2 实例（红线 ≤3）；判分串行（cal2 教训：判分须安静防 OOM 假失败，
+ 满足 ≤2 红线）；anolis /data 余量 <4G 熔断等待；配额熔断按 profile 独立（m31f 免费 / m3 套餐）。
+ 
+-资源闸（补丁① R2，2026-10-22）：worker 循环顶部先 probe 三条件，闸闭则任务不出队。
++资源闸（补丁① R2，2026-10-22；tmpfs 第四探针=R2 同批 D-24 补丁）：worker 循环顶部先
++probe 四条件，闸闭则任务不出队。
+ 60s 缓存对齐 factory-sched mem_gate 先例；阈值/时限全部可用环境变量覆盖（调参不改码）：
+   a. 本机内存：/proc/meminfo MemAvailable < GATE_MEM_MIN_GB（默认 4GiB，判分容器峰值
+      ~889MiB/题、4 倍余量）→ 推迟。本地读取解析（绝不把 awk 程序经 ssh 传远端——
+@@ -31,6 +32,12 @@
+      判不准 → 推迟（fail-closed，先例=sched 磁盘闸 2026-10-20 22:21 闪断放行教训；
+      本条升级原 disk_ok 的「判不准不拦」）。tailnet/ssh 闪断（复发模态）下旧行为=
+      prepare_failed 显性爆发并烧 attempts，新行为=进入带升级通道的推迟。
++  d. 本机 /tmp（tmpfs）可用 < GATE_TMPFS_MIN_GB（默认 2.2GiB）→ 推迟。statvfs 异常
++     =盘点失败=推迟（fail-closed）。校准依据：10-21 晚 /tmp 配额耗尽 EDQUOT（Errno 122）
++     实测发生于仅余 ~1.7G 时（mes500-根因报告.md:42 + 对齐组-state.md:252），64M-1G
++     金丝雀在 3.07G 余量全过——与 factory-sched tmpfs 闸（patch-tmpfs-gate-sched-R2）
++     同阈值。本闸防自反馈死法：results.jsonl/judge.json/state/heartbeat 全落 /tmp，
++     /tmp 满时照常取任务=判分账写到一半撞 EDQUOT。
+ 推迟语义（拦新不杀旧）：闸闭期间任务永不出队（无重排队逻辑，在飞 solve 自然收尾）；
+ 不写 phase（不污染 summary）、不调 _note_failure（不烧 attempts）；每 DEFER_HB_S
+ （600s）刷一次 heartbeat——keepalive 判据是 heartbeat mtime<2400s（factory-keepalive
+@@ -47,7 +54,8 @@
+ 起 fail-closed）等待 300s 后仍未恢复，则走既有失败重试路径（每进程每任务 ≤3 次），
+ 再下一次取任务即被闸拦住。
+ 环境变量：MCODE_GATE_MEM_MIN_GB / MCODE_GATE_DISK_MIN_GB / MCODE_GATE_REMOTE_MIN_GB /
+-MCODE_GATE_CACHE_S / MCODE_DEFER_HB_S / MCODE_DEFER_ESCALATE_S / MCODE_DEFER_HALT_S。
++MCODE_GATE_TMPFS_MIN_GB / MCODE_GATE_CACHE_S / MCODE_DEFER_HB_S / MCODE_DEFER_ESCALATE_S /
++MCODE_DEFER_HALT_S。
+ exit 码语义：run 双实例守卫 exit 3（single_instance，保持不动）；gate-check 闸闭 exit 4；
+ tools/mcode-once-wrapper.sh（无人值守补跑硬闸）闸闭拒绝 exit 4；once 本体不拦人工补跑
+ （人工知情动作）——闸闭只打横幅警告并写 deferred.log，照常执行。
+@@ -119,6 +127,8 @@
+ GATE_MEM_MIN_GB = float(os.environ.get("MCODE_GATE_MEM_MIN_GB", "4"))
+ GATE_DISK_MIN_GB = float(os.environ.get("MCODE_GATE_DISK_MIN_GB", "20"))
+ GATE_REMOTE_MIN_GB = float(os.environ.get("MCODE_GATE_REMOTE_MIN_GB", str(DISK_MIN_GB)))
++# tmpfs 第四探针（R2 同批 D-24 补丁）：/tmp 存判分结果+state+heartbeat，满盘=自反馈死法
++GATE_TMPFS_MIN_GB = float(os.environ.get("MCODE_GATE_TMPFS_MIN_GB", "2.2"))
+ GATE_CACHE_S = float(os.environ.get("MCODE_GATE_CACHE_S", "60"))
+ DEFER_HB_S = float(os.environ.get("MCODE_DEFER_HB_S", "600"))
+ DEFER_ESCALATE_S = float(os.environ.get("MCODE_DEFER_ESCALATE_S", "1800"))
+@@ -301,10 +311,10 @@
+ 
+ 
+ class ResourceGate:
+-    """资源闸（补丁① R2）：三条件探测 + 推迟簿记 + 升级通道。进程级单例（GATE），
+-    两个 worker 共用 60s 缓存。fail-closed 口径：内存读数异常放行（双超时兜底），
+-    本地磁盘/anolis 判不准或不可达一律闭闸（先例见模块 docstring 与 factory-sched
+-    disk_gate 2026-10-20 22:21 闪断放行教训）。"""
++    """资源闸（补丁① R2；tmpfs 第四探针=R2 同批）：四条件探测 + 推迟簿记 + 升级通道。
++    进程级单例（GATE），两个 worker 共用 60s 缓存。fail-closed 口径：内存读数异常放行
++    （双超时兜底），本地磁盘/anolis/本机 /tmp 判不准或不可达一律闭闸（先例见模块
++    docstring 与 factory-sched disk_gate 2026-10-20 22:21 闪断放行教训）。"""
+ 
+     def __init__(self):
+         self._lock = threading.Lock()
+@@ -359,8 +369,19 @@
+             return -1.0, (f"anolis {REMOTE_ROOT} 不可达/判不准（fail-closed，"
+                           f"tailnet/ssh 闪断按推迟处理）: {type(e).__name__}")
+ 
++    @staticmethod
++    def probe_tmpfs():
++        """本机 /tmp（tmpfs）可用（GiB）。D-24 第四探针：results/judge/state/heartbeat
++        全落 /tmp，满盘即取任务=判分账写一半撞 EDQUOT。statvfs 异常=盘点失败=闸闭
++        （fail-closed，同 probe_disk/probe_remote 口径）。"""
++        try:
++            st = os.statvfs("/tmp")
++            return st.f_bavail * st.f_frsize / 1073741824.0, None
++        except Exception as e:
++            return -1.0, f"本机 /tmp statvfs 失败（fail-closed）: {e}"
++
+     def probe(self):
+-        """三条件合并探测，GATE_CACHE_S 缓存。返回 (ok, reasons)。
++        """四条件合并探测，GATE_CACHE_S 缓存。返回 (ok, reasons)。
+ 
+         探测在锁内串行（双 worker 共享一次结果，防缓存过期瞬间的并发 ssh 风暴，
+         同 mem_gate/disk_gate 缓存防风暴意图）。"""
+@@ -389,6 +410,13 @@
+             elif free_r < GATE_REMOTE_MIN_GB:
+                 ok = False
+                 why.append(f"anolis {REMOTE_ROOT} {free_r:.0f}G < {GATE_REMOTE_MIN_GB}G")
++            free_t, err_t = self.probe_tmpfs()
++            if err_t:
++                ok = False
++                why.append(err_t)
++            elif free_t < GATE_TMPFS_MIN_GB:
++                ok = False
++                why.append(f"本机 /tmp {free_t:.1f}G < {GATE_TMPFS_MIN_GB}G")
+             self._at, self._ok, self._why = now, ok, why
+             return ok, list(why)
+ 
+@@ -430,9 +458,16 @@
+             defer_s = now - self.defer_since
+             if now - self._last_hb >= DEFER_HB_S:
+                 self._last_hb = now
+-                os.makedirs(STATE_ROOT, exist_ok=True)
+-                with open(HEARTBEAT, "w") as f:
+-                    f.write(time.strftime("%F %T") + "\n")
++                # 自反馈坑加固（tmpfs 第四探针同批）：闸闭常因 /tmp 满，而心跳恰写
++                # /tmp——ENOSPC/EDQUOT 不得炸掉 defer 路径。沿 _save_defer_state
++                # （:405-413）口径：写失败不致命只记日志；_last_hb 照常推进，下个
++                # HB 周期自然重试，不热循环捶满盘。worker 闸段外另有兜底 try。
++                try:
++                    os.makedirs(STATE_ROOT, exist_ok=True)
++                    with open(HEARTBEAT, "w") as f:
++                        f.write(time.strftime("%F %T") + "\n")
++                except Exception as e:
++                    log(f"[gate] heartbeat 写失败（不致命，下个 HB 周期重试）: {e}")
+                 log(f"deferring(since={time.strftime('%F %T', time.localtime(self.defer_since))}, "
+                     f"连续 {defer_s/60:.0f}min)")
+             if not self.escalated and defer_s > DEFER_ESCALATE_S:
+@@ -533,9 +568,15 @@
+             e.update(kv)
+             e["ts"] = time.strftime("%F %T")
+             save_state(self.state)
+-        os.makedirs(STATE_ROOT, exist_ok=True)
+-        with open(HEARTBEAT, "w") as f:
+-            f.write(time.strftime("%F %T") + "\n")
++        # 自反馈坑加固（tmpfs 第四探针同批）：phase 已落账后心跳写失败不得外抛——
++        # 原样抛出会穿透 worker 的 except 处理器（处理器内 set_phase 再写心跳再炸）
++        # 直至炸掉 worker 线程。沿 :405-413 不致命口径。
++        try:
++            os.makedirs(STATE_ROOT, exist_ok=True)
++            with open(HEARTBEAT, "w") as f:
++                f.write(time.strftime("%F %T") + "\n")
++        except Exception as e:
++            log(f"heartbeat 写失败（不致命，phase 已落账）: {e}")
+ 
+     def phase(self, tid, prof):
+         return self.state.get(self.key(tid, prof), {}).get("phase")
+@@ -757,12 +798,20 @@
+             # 在飞 solve 不经预检、自然收尾后资源回落自动解除。推迟不写 phase、
+             # 不调 _note_failure（不烧 attempts）。defer_tick 返回 "halt"（连续推迟
+             # >DEFER_HALT_S）时同样不取：停取新任务保持升级态等人工，心跳照刷。
+-            ok, _why = self.gate.probe()
+-            if not ok:
+-                self.gate.defer_tick()
++            # tmpfs 第四探针同批加固：闸段任何异常（ENOSPC 撞 log/心跳/簿记路径等）
++            # 只本轮跳过取任务，绝不炸 worker 线程（线程死=无人刷心跳+队列无人消费，
++            # keepalive 2400s 后误判重启，正中自反馈死法）。
++            try:
++                ok, _why = self.gate.probe()
++                if not ok:
++                    self.gate.defer_tick()
++                    time.sleep(60)
++                    continue
++                self.gate.opened()
++            except Exception as e:
++                log(f"[gate] 闸段异常（不致命，本轮跳过取任务）: {type(e).__name__} {e}")
+                 time.sleep(60)
+                 continue
+-            self.gate.opened()
+             try:
+                 tid, prof = q.get(timeout=5)
+             except Exception:
+@@ -821,7 +870,7 @@
+     log(f"mcode-dispatch 常驻启动 pid={os.getpid()} workers={MCODE_WORKERS} "
+         f"quota0={d.quota}")
+     log(f"[gate] 资源闸生效: mem≥{GATE_MEM_MIN_GB}G disk≥{GATE_DISK_MIN_GB}G "
+-        f"remote≥{GATE_REMOTE_MIN_GB}G cache={GATE_CACHE_S:.0f}s "
++        f"remote≥{GATE_REMOTE_MIN_GB}G tmpfs≥{GATE_TMPFS_MIN_GB}G cache={GATE_CACHE_S:.0f}s "
+         f"hb={DEFER_HB_S:.0f}s escalate>{DEFER_ESCALATE_S:.0f}s halt>{DEFER_HALT_S:.0f}s")
+     tiers = set(args.tiers.split(",")) if args.tiers else None
+     q = d.build_queue(tiers=tiers)
+@@ -865,7 +914,7 @@
+     """只读探测资源闸（供 mcode-once-wrapper.sh 与人工巡检）。exit 0=开，4=闭。"""
+     ok, why = GATE.probe()
+     if ok:
+-        print("GATE OPEN（三条件全过：本机内存/本机docker分区/anolis /data）")
++        print("GATE OPEN（四条件全过：本机内存/本机docker分区/anolis /data/本机 /tmp）")
+         return
+     for w in why:
+         print(f"GATE CLOSED: {w}", file=sys.stderr)

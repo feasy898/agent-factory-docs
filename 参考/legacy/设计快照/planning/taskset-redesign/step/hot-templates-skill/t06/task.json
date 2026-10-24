@@ -1,0 +1,23 @@
+{
+  "id": "t06",
+  "type": "boundary",
+  "difficulty": "edge",
+  "instruction": "使用 hot-templates 技能，生成抖音口播爆款内容骨架到指定输出目录 <outdir>。topic 含全角引号、括号、点号与 emoji，验证 clean_tag、标题代入、hook_3s 主题替换。",
+  "nonce_input": {
+    "platform": "dy",
+    "topic": "Python 3.12「新特性」与异步编程",
+    "points": [
+      "asyncio.TaskGroup",
+      "contextvars跨线程传递",
+      "exception group统一捕获"
+    ]
+  },
+  "expected": {
+    "topic_in_hook": "Python 3.12「新特性」与异步编程",
+    "clean_tag_topic": "Python312新特性与异步编程",
+    "filled_from_input_topic": [
+      "hook_3s"
+    ]
+  },
+  "design_note": "强裸模型通过率 ≤45%：裸模型会错误 clean_tag（把 「」 当成空白 stripping 掉）、或在 hook_3s 中漏代 topic、或在 title/tag_group 中 clean_tag 不一致。frozen-tokens.md 规定 clean_tag 正则 [\\s#]+ 替换为空。"
+}

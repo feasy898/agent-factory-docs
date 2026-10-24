@@ -1,0 +1,14 @@
+{
+  "package": "office-templates-skill",
+  "task_count": 8,
+  "tasks": [
+    {"id": "t01", "type": "ability", "difficulty": "basic", "title": "周报全字段标准生成", "files": ["task.json", "brief.md", "rubric.md"]},
+    {"id": "t02", "type": "ability", "difficulty": "basic", "title": "请示函全字段标准生成", "files": ["task.json", "brief.md", "rubric.md"]},
+    {"id": "t03", "type": "ability", "difficulty": "basic", "title": "会议通知全字段标准生成", "files": ["task.json", "brief.md", "rubric.md"]},
+    {"id": "t04", "type": "ability", "difficulty": "basic", "title": "工作总结全字段标准生成", "files": ["task.json", "brief.md", "rubric.md"]},
+    {"id": "t05", "type": "boundary", "difficulty": "edge", "title": "周报选填缺失叠加", "files": ["task.json", "brief.md", "rubric.md"]},
+    {"id": "t06", "type": "boundary", "difficulty": "edge", "title": "请示函必填缺失 + unknown_keys", "files": ["task.json", "brief.md", "rubric.md"]},
+    {"id": "t07", "type": "trap", "difficulty": "hard", "title": "非法输入拒绝", "files": ["task.json", "brief.md", "rubric.md"]},
+    {"id": "t08", "type": "trap", "difficulty": "hard", "title": "strip 与日期格式边界", "files": ["task.json", "brief.md", "rubric.md"]}
+  ]
+}

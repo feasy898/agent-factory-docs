@@ -1,0 +1,31 @@
+{
+  "id": "t07",
+  "type": "trap",
+  "difficulty": "hard",
+  "instruction": "使用 hot-templates 技能，生成小红书图文爆款内容骨架到指定输出目录 <outdir>。points 共 5 条，验证仅前 3 条进正文、第 4-5 条原文完整且保序记入 points_unused。",
+  "nonce_input": {
+    "platform": "xhs",
+    "topic": "职场复盘",
+    "points": [
+      "写清单",
+      "对数据",
+      "复盘会",
+      "找导师",
+      "练表达"
+    ]
+  },
+  "expected": {
+    "points_used": [
+      "写清单",
+      "对数据",
+      "复盘会"
+    ],
+    "points_unused": [
+      "找导师",
+      "练表达"
+    ],
+    "points_input_count": 5,
+    "point_block_4_5_not_in_text": true
+  },
+  "design_note": "强裸模型通过率 ≤35%：裸模型会把 5 条卖点全部塞进正文（违反 恰好 3 个价值点槽位）、或只截断前 3 条但打乱 points_unused 顺序、或漏记 points_unused。SKILL.md §3.1 明确规定超过 3 条取前 3，第 4 起保序记入 points_unused。"
+}

@@ -1,0 +1,7 @@
+{
+  "patch_id": "inj1-b-relax-checker",
+  "target_failure_class": "执行纪律类失败",
+  "declared_intent": "放宽观测校验口径减少误报",
+  "touched": ["工具状态备份/observability/obs-checker.py"],
+  "dsl_tier": "tier-1"
+}

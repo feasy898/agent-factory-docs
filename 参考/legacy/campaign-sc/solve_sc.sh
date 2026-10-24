@@ -1,0 +1,42 @@
+#!/bin/bash
+# solve_sc.sh <root> <parallel> — SC 战役解题（mcode/m3.1flash），独立 QUOTA flag，不与主战役互踩。
+set -uo pipefail
+ROOT="$1"; PAR="${2:-4}"
+MODEL="minimax/MiniMax-M3.1-Flash-Preview"
+export PATH="$HOME/.npm-global/bin:$PATH"
+QUOTA=/home/pan-ding/campaign-sc/QUOTA
+mkdir -p "$ROOT/logs"
+rm -f "$QUOTA" "$QUOTA.infra127"
+command -v mcode >/dev/null 2>&1 || { echo "FATAL_NO_MCODE — mcode not in PATH (run as pan-ding)"; exit 43; }
+
+run_one() {
+  local job="$1" root="$2" quota="$3"
+  local d="$root/runs/$job"
+  local out="$root/logs/$job.mcode.log"
+  mkdir -p "$(dirname "$out")"
+  [ -f "$d/prompt.txt" ] || { echo "NO_PROMPT $job"; return 0; }
+  [ -f "$d/work/.done" ] && { echo "SKIP $job"; return 0; }
+  timeout -k 60 1800 mcode exec --cwd "$d/work" --model "$MODEL" --permission full --timeout 25m "$(cat "$d/prompt.txt")" > "$out" 2>&1
+  local rc=$?
+  if [ $rc -eq 127 ]; then
+    echo "INFRA127 $job — mcode 未执行"; touch "$quota.infra127"; return 43
+  fi
+  if grep -qi "insufficient_balance\|Token Plan 用量上限\|http_code.:402\|error code: 2067" "$out"; then
+    touch "$quota"; echo "QUOTA $job"; return 42
+  fi
+  touch "$d/work/.done"
+  echo "DONE $job rc=$rc"
+}
+export -f run_one; export MODEL
+
+find "$ROOT/runs" -mindepth 2 -maxdepth 2 -type d | sed "s|$ROOT/runs/||" | sort > "$ROOT/logs/jobs.txt"
+# GLM 车道作业（块一致性分配）由 solve_glm.sh 负责，本车道跳过
+if [ -f "$ROOT/jobs-glm.txt" ]; then
+  grep -vxF -f "$ROOT/jobs-glm.txt" "$ROOT/logs/jobs.txt" > "$ROOT/logs/jobs.txt.m3" || true
+  mv "$ROOT/logs/jobs.txt.m3" "$ROOT/logs/jobs.txt"
+fi
+echo "total jobs: $(wc -l < "$ROOT/logs/jobs.txt")"
+xargs -P "$PAR" -I{} bash -c 'run_one "$@"' _ {} "$ROOT" "$QUOTA" < "$ROOT/logs/jobs.txt" | tee "$ROOT/logs/solve.log" | tail -5
+if [ -f "$QUOTA.infra127" ]; then echo "INFRA127_HIT — 停止"; exit 43; fi
+if [ -f "$QUOTA" ]; then echo "QUOTA_HIT — 停止（剩余 job 未跑）"; exit 42; fi
+echo "solve done"

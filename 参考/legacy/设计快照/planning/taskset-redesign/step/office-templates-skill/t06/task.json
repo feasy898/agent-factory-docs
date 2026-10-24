@@ -1,0 +1,35 @@
+{
+  "id": "t06",
+  "type": "boundary",
+  "difficulty": "edge",
+  "instruction": "使用 office-templates 技能，对下面的请示函数据 JSON 生成 文书.docx 与 fields.json。数据包含：主送机关缺失、请示事项为空字符串、联系电话/成文日期选填缺失、含模板外键「备注」。验证必填缺失占位、选填留空、unknown_keys 记账。",
+  "nonce_input": {
+    "description": "请示函边界 JSON，内嵌",
+    "data": {
+      "请示事由": "升级开发环境",
+      "主送机关": "",
+      "请示缘由": "当前环境版本过低，无法支撑新业务上线",
+      "请示事项": "",
+      "请示单位": "测试部",
+      "联系人": "李工",
+      "联系电话": "",
+      "成文日期": "",
+      "备注": "加急"
+    }
+  },
+  "expected": {
+    "filled": 4,
+    "missing_required": [
+      "主送机关",
+      "请示事项"
+    ],
+    "missing_optional": [
+      "联系电话",
+      "成文日期"
+    ],
+    "unknown_keys": [
+      "备注"
+    ]
+  },
+  "design_note": "强裸模型通过率 ≤45%：裸模型会把空字符串当成已填充、漏记 unknown_keys、或把 联系电话： 后面的空白删除成整行消失。SKILL.md §3.2 F1/F2/F6 规定空白字符串为缺失、模板外键按字典序记账。"
+}

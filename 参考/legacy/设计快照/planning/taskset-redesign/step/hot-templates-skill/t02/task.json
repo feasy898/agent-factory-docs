@@ -1,0 +1,23 @@
+{
+  "id": "t02",
+  "type": "ability",
+  "difficulty": "basic",
+  "instruction": "使用 hot-templates 技能，生成小红书图文爆款内容骨架（骨架.md + structure.json）到指定输出目录 <outdir>。",
+  "nonce_input": {
+    "platform": "xhs",
+    "topic": "租房避坑指南",
+    "points": [
+      "签约前查房东房产证与身份证一致性",
+      "押金条款写明退还条件与时限",
+      "入住当天拍照录像留档"
+    ]
+  },
+  "expected": {
+    "要素数": 7,
+    "title_含_🔥_与_数字": true,
+    "tag_count_正则": 6,
+    "points_used_len": 3,
+    "points_unused_len": 0
+  },
+  "design_note": "强裸模型通过率 ≤55%：裸模型会把 title 写成无 emoji 的普通标题、把 point_block 写成无 emoji 的段落、或把标签组写成少于 3 个。必须严格对齐 xhs.md 的 emoji 映射与标签冻结口径。"
+}

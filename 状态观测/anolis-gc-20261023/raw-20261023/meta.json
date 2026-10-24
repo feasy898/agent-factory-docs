@@ -1,0 +1,9 @@
+{
+ "as_of_host": "2026-10-23T08:05:41+08:00",
+ "image_object_count": 122,
+ "inspect_count": 122,
+ "hist_count": 122,
+ "as_of_done": "2026-10-23 08:05:57",
+ "elapsed_s": 16.8,
+ "collect_cmd": "ssh anolis: df -P; docker system df[-v]; docker ps -a; docker images -a; docker image inspect <all-ids> (Id,Size,RootFS.Layers); docker image history <each id> (Size)"
+}

@@ -1,0 +1,44 @@
+#!/bin/bash
+# solve_glm.sh <root> <parallel> — SC 战役 GLM 车道解题（zcode CLI / GLM-5.3-Flash）。
+# 只跑 jobs-glm.txt 里的 job（split_lanes.py 按 (task,rep) 块一致性分配），其余同 solve_sc.sh。
+set -uo pipefail
+ROOT="$1"; PAR="${2:-3}"
+MODEL="account:bigmodel-individual-coding-plan/GLM-5.3-Flash"
+export PATH="$HOME/.npm-global/bin:$PATH"
+QUOTA=/home/pan-ding/campaign-sc/QUOTA_GLM
+LIST="$ROOT/jobs-glm.txt"
+mkdir -p "$ROOT/logs"
+rm -f "$QUOTA" "$QUOTA.infra127"
+
+command -v zcode >/dev/null 2>&1 || { echo "FATAL_NO_ZCODE — zcode CLI not in PATH"; exit 43; }
+[ -f "$LIST" ] || { echo "no jobs-glm.txt — nothing to do"; exit 0; }
+
+run_one() {
+  local job="$1" root="$2" quota="$3" model="$4"
+  local d="$root/runs/$job"
+  local out="$root/logs/$job.glm.log"
+  mkdir -p "$(dirname "$out")"
+  [ -f "$d/prompt.txt" ] || { echo "NO_PROMPT $job"; return 0; }
+  [ -f "$d/work/.done" ] && { echo "SKIP $job"; return 0; }
+  timeout -k 60 1800 zcode -p "$(cat "$d/prompt.txt")" --cwd "$d/work" --mode yolo --model "$model" > "$out" 2>&1
+  local rc=$?
+  if [ $rc -eq 127 ]; then
+    echo "INFRA127 $job — zcode 未执行"; touch "$quota.infra127"; return 43
+  fi
+  if [ $rc -eq 124 ] || [ $rc -eq 137 ] || [ $rc -eq 143 ]; then
+    touch "$d/work/.done"; echo "DONE $job rc=$rc (timeout, partial work)"; return 0
+  fi
+  if tail -c 20000 "$out" | grep -qiE "rate.?limit|http[^ ]*429|responseStatus: 429|Turn execution failed|insufficient|余额|用量上限|Token Plan|too many requests"; then
+    touch "$quota"; echo "QUOTA $job rc=$rc"; return 42
+  fi
+  touch "$d/work/.done"
+  echo "DONE $job rc=$rc"
+}
+export -f run_one
+
+sort "$LIST" > "$ROOT/logs/jobs-glm-round.txt"
+echo "glm lane total jobs: $(wc -l < "$ROOT/logs/jobs-glm-round.txt")"
+xargs -P "$PAR" -I{} bash -c 'run_one "$@"' _ {} "$ROOT" "$QUOTA" "$MODEL" < "$ROOT/logs/jobs-glm-round.txt" | tee "$ROOT/logs/solve-glm.log" | tail -5
+if [ -f "$QUOTA.infra127" ]; then echo "INFRA127_HIT — 停止"; exit 43; fi
+if [ -f "$QUOTA" ]; then echo "GLM_QUOTA_HIT — 停止（剩余 job 未跑）"; exit 42; fi
+echo "glm solve done"
