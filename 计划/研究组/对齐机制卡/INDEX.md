@@ -19,7 +19,7 @@
 | 6 | MetaGPT.md | MetaGPT | 成 | 4224 | 53 | 正常 | 映射预判「流水线+结构化工件交接」 |
 | 7 | CAMEL.md | CAMEL | 成 | 3213 | 70 | 正常 | 未动用 AgentVerse 备选 |
 | 8 | GPTSwarm.md | GPTSwarm | 成 | 3334 | 57 | 正常 | |
-| 9 | Agensh-DeLM.md | Agensh（备选 DeLM） | 成 | 3171 | 158 | **低置信，需人工补** | 模型自述不知 Agensh/DeLM，按预案改写 AutoGen Swarm 去中心化交接+GroupChat 协商并诚实标注 `ACTUAL`/`CONFIDENCE: LOW`；内容本身合格但非原目标，需人工补 Agensh/DeLM 原始机制 |
+| 9 | Agensh-DeLM.md | Agensh + DeLM（『或』条款升级为双目标合一） | 成 | 3171 | 158 | 低置信 → **已重写补课（高，2026-10-24）** | 原卡 m3.1f 不识目标、实写 AutoGen Swarm（已作废）；2026-10-24 由带检索能力的代理（对齐机制卡补写者）按裁决书 §四.2 补卡令重写：Agensh=arXiv:2609.26781（微软研究院，2026-09-22）、DeLM=arXiv:2606.10662（斯坦福，2026-06-09，代码 github.com/yuzhenmao/DeLM），双目标均网络检索核实、六节齐全、机制断言逐条注论文来源，重写后 11701 字（含检索过程与未核实项附录） |
 | 10 | Multi-Agent-Debate.md | Multi-Agent Debate | 成 | 2854 | 65 | 正常 | |
 | 11 | AFlow.md | AFlow | 成 | 3351 | 58 | 正常 | |
 | 12 | ADAS.md | ADAS | 成 | 3609 | 81 | 正常 | |
@@ -38,5 +38,5 @@
 
 ## 低置信与补课清单
 
-- **Agensh / DeLM**（去中心化协作）：m3.1f 知识库内无此二者，卡片实写 AutoGen Swarm 通道 —— 需人工补 Agensh/DeLM 原始论文/仓库机制后重写或增补该卡。
+- **Agensh / DeLM**（去中心化协作）：✅ **已销项（2026-10-24）**——带检索能力的代理按裁决书 §四.2 补卡令重写：双目标均检索核实（Agensh=arXiv:2609.26781，微软研究院，1→1024 agent 自组织 harness；DeLM=arXiv:2606.10662，斯坦福，共享上下文+任务队列取代主 agent，Agensh 明引其为共享上下文思想来源）；原 AutoGen Swarm 代写作废；卡内含检索词、命中路径与未核实项附录。
 - Voyager 卡内个别实现细节与预算数字带"存疑"标注（模型自报），翻译 DSL 时按机制层采信、数字层复核。

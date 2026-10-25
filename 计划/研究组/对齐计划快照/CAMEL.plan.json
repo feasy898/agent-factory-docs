@@ -1,0 +1,783 @@
+{
+  "v": 1,
+  "body": {
+    "plan_id": "plan.camel_roleplay@1.0+afdfb924fde3",
+    "compiled_from": {
+      "dsl_digest": "afdfb924fde30f971b1df966f04bdd27120f78f514f412e1fb6c0db73eb9f2d1",
+      "compiler_version": "0.1.0",
+      "graph_version": "1.0",
+      "registry_digest": "63c3478e9321e1c58318620a592e9953ef34cee3a5d19ea4c3300a722fafe15b"
+    },
+    "line": {
+      "line_id": null,
+      "line_version": null,
+      "domain_pack_digest": null
+    },
+    "order": {
+      "id": "",
+      "stable_id": "",
+      "run_id": "",
+      "state": "Created",
+      "graph_version": "1.0",
+      "line": null,
+      "budget_voucher": null,
+      "artifacts": [],
+      "sla": {
+        "deadline": null,
+        "priority": "Normal"
+      },
+      "supersedes": null,
+      "history": []
+    },
+    "graph": {
+      "graph_version": "1.0",
+      "name": "camel_roleplay",
+      "entry": "inception",
+      "nodes": [
+        {
+          "id": "dialogue",
+          "kind": "task",
+          "loop_spec": {
+            "body": "camel_roleplay/dialogue",
+            "max_iterations": 12,
+            "carried": [
+              {
+                "store": "assistant_history",
+                "max_items": 64
+              },
+              {
+                "store": "user_history",
+                "max_items": 64
+              }
+            ],
+            "safety_points": [
+              {
+                "node": "format_gate",
+                "kind": "gate"
+              },
+              {
+                "node": "outcome_gate",
+                "kind": "gate"
+              }
+            ],
+            "exit_when": {
+              "source": "completion_judge.outcome.completed == true",
+              "roots": [
+                "completion_judge"
+              ],
+              "digest": "9f1ce59324ec7683591e1ae918efce3b4bc4e6ca21e1a15cf11f4955dea7b4f3"
+            },
+            "on_exhausted": "fail"
+          },
+          "capability_refs": []
+        },
+        {
+          "id": "inception",
+          "kind": "task",
+          "capability_refs": []
+        },
+        {
+          "id": "role_parser",
+          "kind": "task",
+          "escape": {
+            "kind": "free_text_parser",
+            "impl_ref": "packages/camelkit@1.0.0/hatches/role_parser.py",
+            "reason": "Inception 产出的是自由文本：需切分为 role_name/profile/chat_example 三个字段并组装三段式任务提示（任务+助手角色+用户角色）；自由文本切分无声明式对应物（卡片⑥b-1，含多轮 Chat Example 卡片⑥b-5）",
+            "owner": "lang-team",
+            "share_budget_pct": 10
+          },
+          "capability_refs": []
+        },
+        {
+          "id": "social_eval",
+          "kind": "check",
+          "capability_refs": []
+        }
+      ],
+      "edges": [
+        {
+          "from": "dialogue",
+          "output": "outcome",
+          "to": "social_eval",
+          "input": "outcome",
+          "checkpoint": false
+        },
+        {
+          "from": "inception",
+          "output": "draft",
+          "to": "role_parser",
+          "input": "draft",
+          "checkpoint": false
+        },
+        {
+          "from": "role_parser",
+          "output": "rewritten_task",
+          "to": "dialogue",
+          "input": "rewritten_task",
+          "checkpoint": false
+        }
+      ],
+      "subgraphs": {
+        "camel_roleplay/dialogue": {
+          "graph_version": "1.0",
+          "entry": "user_agent",
+          "nodes": [
+            {
+              "id": "assistant_agent",
+              "kind": "task",
+              "capability_refs": []
+            },
+            {
+              "id": "completion_judge",
+              "kind": "task",
+              "escape": {
+                "kind": "llm_predicate",
+                "impl_ref": "packages/camelkit@1.0.0/hatches/completion_judge.py",
+                "reason": "'任务已达成' 是 LLM 语义判断而非字段匹配：需评估器对整段对话给出完成判定（卡片⑥b-2）；论文中该判定由用户代理自行做出，此处外置为独立评估器以满足 INV-3 生成器-验证器分离",
+                "owner": "lang-team",
+                "share_budget_pct": 10
+              },
+              "capability_refs": []
+            },
+            {
+              "id": "format_gate",
+              "kind": "gate",
+              "capability_refs": []
+            },
+            {
+              "id": "outcome_gate",
+              "kind": "gate",
+              "capability_refs": []
+            },
+            {
+              "id": "user_agent",
+              "kind": "task",
+              "capability_refs": []
+            }
+          ],
+          "edges": [
+            {
+              "from": "assistant_agent",
+              "output": "message",
+              "to": "format_gate",
+              "input": "message",
+              "checkpoint": false
+            },
+            {
+              "from": "completion_judge",
+              "output": "outcome",
+              "to": "outcome_gate",
+              "input": "outcome",
+              "checkpoint": false
+            },
+            {
+              "from": "format_gate",
+              "output": "message",
+              "to": "completion_judge",
+              "input": "answer",
+              "checkpoint": false
+            },
+            {
+              "from": "user_agent",
+              "output": "message",
+              "to": "assistant_agent",
+              "input": "incoming",
+              "checkpoint": false
+            }
+          ]
+        }
+      }
+    },
+    "interface": {
+      "input_type": "camel_input",
+      "output_type": "dialogue_outcome",
+      "output_from": "dialogue",
+      "intent": "CAMEL 两段式：Inception 元提示一次性生成双角色人设（角色名+Profile+Chat Example）与改写任务提示（任务+助手角色+用户角色）→ 用户方先发的交替对话受控环（每轮=用户发言+助手应答+消息格式门+语义完成判定）→ 轮次/token 上限强制截断；人设自由文本切分与『任务已达成』语义判定走 L4 逃逸舱"
+    },
+    "types": {
+      "camel_input": {
+        "properties": {
+          "task_description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_description"
+        ],
+        "type": "object"
+      },
+      "chat_message": {
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "speaker": {
+            "type": "string"
+          },
+          "turn": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "speaker",
+          "content",
+          "turn"
+        ],
+        "type": "object"
+      },
+      "dialogue_outcome": {
+        "properties": {
+          "completed": {
+            "type": "boolean"
+          },
+          "final_message": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "completed",
+          "reason",
+          "final_message"
+        ],
+        "type": "object"
+      },
+      "inception_draft": {
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "role_description": {
+        "properties": {
+          "chat_example": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "role_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "role_name",
+          "profile",
+          "chat_example"
+        ],
+        "type": "object"
+      },
+      "social_scores": {
+        "properties": {
+          "cooperation_milli": {
+            "type": "integer"
+          },
+          "efficiency_milli": {
+            "type": "integer"
+          },
+          "extensibility_milli": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cooperation_milli",
+          "efficiency_milli",
+          "extensibility_milli"
+        ],
+        "type": "object"
+      },
+      "task_prompt": {
+        "properties": {
+          "assistant_role": {
+            "type": "string"
+          },
+          "task": {
+            "type": "string"
+          },
+          "user_role": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task",
+          "assistant_role",
+          "user_role"
+        ],
+        "type": "object"
+      }
+    },
+    "stores": {
+      "assistant_history": {
+        "name": "assistant_history",
+        "kind": "message_log",
+        "writer": "dialogue.assistant_agent",
+        "lifecycle": "run",
+        "retention": {
+          "max_items": 64
+        },
+        "eval_input": false
+      },
+      "assistant_role": {
+        "name": "assistant_role",
+        "kind": "collection",
+        "item": "role_description",
+        "writer": "role_parser",
+        "lifecycle": "run",
+        "retention": {
+          "max_items": 1
+        },
+        "eval_input": false
+      },
+      "eval_scores": {
+        "name": "eval_scores",
+        "kind": "collection",
+        "item": "social_scores",
+        "writer": "social_eval",
+        "lifecycle": "run",
+        "retention": {
+          "max_items": 8
+        },
+        "eval_input": false
+      },
+      "rewritten_task": {
+        "name": "rewritten_task",
+        "kind": "collection",
+        "item": "task_prompt",
+        "writer": "role_parser",
+        "lifecycle": "run",
+        "retention": {
+          "max_items": 1
+        },
+        "eval_input": false
+      },
+      "user_history": {
+        "name": "user_history",
+        "kind": "message_log",
+        "writer": "dialogue.user_agent",
+        "lifecycle": "run",
+        "retention": {
+          "max_items": 64
+        },
+        "eval_input": false
+      },
+      "user_role": {
+        "name": "user_role",
+        "kind": "collection",
+        "item": "role_description",
+        "writer": "role_parser",
+        "lifecycle": "run",
+        "retention": {
+          "max_items": 1
+        },
+        "eval_input": false
+      }
+    },
+    "node_exec": [
+      {
+        "node_id": "dialogue",
+        "unit": null,
+        "components": {
+          "model_route": null,
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "outcome",
+            "is_final": true,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "dialogue.assistant_agent",
+        "unit": null,
+        "components": {
+          "model_route": "route.main@1",
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [
+          {
+            "id": "assistant_msg_tokens",
+            "dimension": "tokens_out",
+            "cap": 2000
+          }
+        ],
+        "artifact_contract": [
+          {
+            "name": "message",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "dialogue.completion_judge",
+        "unit": null,
+        "components": {
+          "model_route": null,
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "outcome",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "dialogue.format_gate",
+        "unit": null,
+        "components": {
+          "model_route": null,
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "message",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "dialogue.outcome_gate",
+        "unit": null,
+        "components": {
+          "model_route": null,
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "outcome",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "dialogue.user_agent",
+        "unit": null,
+        "components": {
+          "model_route": "route.main@1",
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [
+          {
+            "id": "user_msg_tokens",
+            "dimension": "tokens_out",
+            "cap": 2000
+          }
+        ],
+        "artifact_contract": [
+          {
+            "name": "message",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "inception",
+        "unit": null,
+        "components": {
+          "model_route": "route.main@1",
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "draft",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "role_parser",
+        "unit": null,
+        "components": {
+          "model_route": null,
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "assistant_role",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          },
+          {
+            "name": "rewritten_task",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          },
+          {
+            "name": "user_role",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "social_eval",
+        "unit": {
+          "unit_id": "pkg.camelkit.social_eval",
+          "unit_version": "1"
+        },
+        "components": {
+          "model_route": null,
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "scores",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      }
+    ],
+    "budget": {
+      "budgets": [
+        {
+          "id": "assistant_msg_tokens",
+          "dimension": "tokens_out",
+          "scope": "node:dialogue.assistant_agent",
+          "cap": 2000
+        },
+        {
+          "id": "plan_cost",
+          "dimension": "cents",
+          "scope": "plan",
+          "cap": 600
+        },
+        {
+          "id": "plan_tokens",
+          "dimension": "tokens_total",
+          "scope": "plan",
+          "cap": 600000
+        },
+        {
+          "id": "round_calls",
+          "dimension": "model_calls",
+          "scope": "loop:dialogue",
+          "cap": 40
+        },
+        {
+          "id": "round_turns",
+          "dimension": "turns",
+          "scope": "loop:dialogue",
+          "cap": 36
+        },
+        {
+          "id": "user_msg_tokens",
+          "dimension": "tokens_out",
+          "scope": "node:dialogue.user_agent",
+          "cap": 2000
+        }
+      ],
+      "stop": [
+        {
+          "when": {
+            "source": "steps.iterations >= 12",
+            "roots": [
+              "steps"
+            ],
+            "digest": "8df57f4f36f6e7e0c633f0b489e6e900a70335c0ab9536e93826e367268464ad"
+          },
+          "outcome": "failed"
+        },
+        {
+          "when": {
+            "source": "budget.tokens_total_spent >= budget.tokens_total_cap * 9 / 10",
+            "roots": [
+              "budget"
+            ],
+            "digest": "9b4ef709f3d777b920c38adb5c5a81726e7cc695dd5269e5044386e4fc531ef2"
+          },
+          "outcome": "failed"
+        }
+      ],
+      "failures": [
+        {
+          "class": "transport_transient",
+          "retry": {
+            "max": 3,
+            "backoff_ms": 800
+          }
+        },
+        {
+          "class": "schema_invalid",
+          "retry": {
+            "max": 2,
+            "backoff_ms": 0
+          },
+          "route": "next_iteration",
+          "feedback": "format_reminder"
+        },
+        {
+          "class": "gate_refused",
+          "route": "next_iteration"
+        },
+        {
+          "class": "budget_exhausted",
+          "terminal": true,
+          "outcome": "failed"
+        }
+      ]
+    },
+    "resources": {
+      "gates": [],
+      "limits": []
+    },
+    "observation": {
+      "span_tree": [
+        "invoke_workflow",
+        "invoke_agent",
+        "chat",
+        "execute_tool"
+      ],
+      "ctx_propagation": "env",
+      "otel": {
+        "enabled": false,
+        "endpoint": null,
+        "batch_size": 512
+      },
+      "events": {
+        "root_env": "AF_OBS_ROOT",
+        "line": "",
+        "index": true,
+        "manifest": true
+      },
+      "mes": {
+        "endpoint_ref": "env:MES_CH_URL",
+        "database": "af_mes",
+        "line_id": "",
+        "station_id": ""
+      }
+    },
+    "recovery": {
+      "node_retry": null,
+      "resume_source": [
+        "run_store",
+        "record_stream",
+        "mes_events"
+      ],
+      "safety_points": [
+        {
+          "loop_node": "dialogue",
+          "node": "format_gate",
+          "kind": "gate"
+        },
+        {
+          "loop_node": "dialogue",
+          "node": "outcome_gate",
+          "kind": "gate"
+        }
+      ],
+      "failures": [
+        {
+          "class": "transport_transient",
+          "retry": {
+            "max": 3,
+            "backoff_ms": 800
+          }
+        },
+        {
+          "class": "schema_invalid",
+          "retry": {
+            "max": 2,
+            "backoff_ms": 0
+          },
+          "route": "next_iteration",
+          "feedback": "format_reminder"
+        },
+        {
+          "class": "gate_refused",
+          "route": "next_iteration"
+        },
+        {
+          "class": "budget_exhausted",
+          "terminal": true,
+          "outcome": "failed"
+        }
+      ]
+    },
+    "escapes": {
+      "dialogue.completion_judge": {
+        "kind": "llm_predicate",
+        "impl_ref": "packages/camelkit@1.0.0/hatches/completion_judge.py",
+        "reason": "'任务已达成' 是 LLM 语义判断而非字段匹配：需评估器对整段对话给出完成判定（卡片⑥b-2）；论文中该判定由用户代理自行做出，此处外置为独立评估器以满足 INV-3 生成器-验证器分离",
+        "owner": "lang-team",
+        "share_budget_pct": 10
+      },
+      "role_parser": {
+        "kind": "free_text_parser",
+        "impl_ref": "packages/camelkit@1.0.0/hatches/role_parser.py",
+        "reason": "Inception 产出的是自由文本：需切分为 role_name/profile/chat_example 三个字段并组装三段式任务提示（任务+助手角色+用户角色）；自由文本切分无声明式对应物（卡片⑥b-1，含多轮 Chat Example 卡片⑥b-5）",
+        "owner": "lang-team",
+        "share_budget_pct": 10
+      }
+    }
+  }
+}

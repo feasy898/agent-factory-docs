@@ -13,3 +13,6 @@ __pycache__/
 *.tar.gz
 
 # ── 单文件 >10MB 的杂件无 gitignore 语法可表达，入库前人工/工具把关 ──
+
+# ── af 运行态（订单台账/凭证种子 voucher-key.seed 等运行时件，非公开文书；2026-10-26 增）──
+af-state/

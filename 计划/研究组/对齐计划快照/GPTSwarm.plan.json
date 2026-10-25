@@ -1,0 +1,1252 @@
+{
+  "v": 1,
+  "body": {
+    "plan_id": "plan.gptswarm_candidate_graph@1.0+16f9891c3bef",
+    "compiled_from": {
+      "dsl_digest": "16f9891c3bef43e2e9ea81d1d90d20b85fe2858025e03ab4dd175ccfa05de894",
+      "compiler_version": "0.1.0",
+      "graph_version": "1.0",
+      "registry_digest": "63c3478e9321e1c58318620a592e9953ef34cee3a5d19ea4c3300a722fafe15b"
+    },
+    "line": {
+      "line_id": null,
+      "line_version": null,
+      "domain_pack_digest": null
+    },
+    "order": {
+      "id": "",
+      "stable_id": "",
+      "run_id": "",
+      "state": "Created",
+      "graph_version": "1.0",
+      "line": null,
+      "budget_voucher": null,
+      "artifacts": [],
+      "sla": {
+        "deadline": null,
+        "priority": "Normal"
+      },
+      "supersedes": null,
+      "history": []
+    },
+    "graph": {
+      "graph_version": "1.0",
+      "name": "gptswarm_candidate_graph",
+      "entry": "search",
+      "nodes": [
+        {
+          "id": "search",
+          "kind": "task",
+          "loop_spec": {
+            "body": "gptswarm_candidate_graph/search",
+            "max_iterations": 40,
+            "carried": [
+              {
+                "store": "graph_archive",
+                "max_items": 64
+              }
+            ],
+            "safety_points": [
+              {
+                "node": "revise.verdict_gate",
+                "kind": "gate"
+              }
+            ],
+            "exit_when": {
+              "source": "budget.cents_spent >= budget.cents_cap * 9 / 10",
+              "roots": [
+                "budget"
+              ],
+              "digest": "3be1e182158bab26f6795b5974234a63c498ed5ca6b81c13be78e05453256197"
+            },
+            "on_exhausted": "continue"
+          },
+          "capability_refs": []
+        }
+      ],
+      "edges": [],
+      "subgraphs": {
+        "gptswarm_candidate_graph/search": {
+          "graph_version": "1.0",
+          "entry": "planner",
+          "nodes": [
+            {
+              "id": "aggregate",
+              "kind": "transform",
+              "capability_refs": []
+            },
+            {
+              "id": "decide",
+              "kind": "task",
+              "capability_refs": []
+            },
+            {
+              "id": "dispatch",
+              "kind": "task",
+              "escape": {
+                "kind": "runtime_context_mutation",
+                "impl_ref": "packages/swarmkit@1.0.0/hatches/dispatch.py",
+                "reason": "静态 map 只能表达静态扇出；动态 fan-out、节点级超时取消与异步调度语义在 DSL 之外（卡 ⑥b-5）",
+                "owner": "lang-team",
+                "share_budget_pct": 6
+              },
+              "capability_refs": []
+            },
+            {
+              "id": "execute_map",
+              "kind": "task",
+              "map_spec": {
+                "body": "gptswarm_candidate_graph/search/execute_map",
+                "over": "dispatch.worklist"
+              },
+              "capability_refs": []
+            },
+            {
+              "id": "graph_edit",
+              "kind": "task",
+              "escape": {
+                "kind": "program_synthesis",
+                "impl_ref": "packages/swarmkit@1.0.0/hatches/graph_edit.py",
+                "reason": "图编辑算子（增删节点/增删边/改节点依赖/替换节点实现）在运行时产出新图；静态 DSL 无法表达「产出一张新图」（卡 ⑥b-1）",
+                "owner": "lang-team",
+                "share_budget_pct": 10
+              },
+              "capability_refs": []
+            },
+            {
+              "id": "graph_value",
+              "kind": "task",
+              "escape": {
+                "kind": "program_synthesis",
+                "impl_ref": "packages/swarmkit@1.0.0/hatches/graph_value.py",
+                "reason": "图可被嵌套、复用、作为另一张图的节点；DSL 需把「图」提升为一等值类型，否则逃逸（卡 ⑥b-6）",
+                "owner": "lang-team",
+                "share_budget_pct": 4
+              },
+              "capability_refs": []
+            },
+            {
+              "id": "memory",
+              "kind": "task",
+              "capability_refs": []
+            },
+            {
+              "id": "optimize",
+              "kind": "task",
+              "escape": {
+                "kind": "meta_loop",
+                "impl_ref": "packages/swarmkit@1.0.0/hatches/policy_search.py",
+                "reason": "REINFORCE 类无梯度搜索 + 精英保留 + 回退整体在 DSL 之外，以「调用外部优化器并把结果作为子图回填」接入（卡 ⑥b-2）",
+                "owner": "rl-team",
+                "share_budget_pct": 15
+              },
+              "capability_refs": []
+            },
+            {
+              "id": "planner",
+              "kind": "task",
+              "capability_refs": []
+            },
+            {
+              "id": "reviewer",
+              "kind": "task",
+              "capability_refs": []
+            },
+            {
+              "id": "revise",
+              "kind": "task",
+              "loop_spec": {
+                "body": "gptswarm_candidate_graph/search/revise",
+                "max_iterations": 3,
+                "carried": [],
+                "safety_points": [
+                  {
+                    "node": "verdict_gate",
+                    "kind": "gate"
+                  }
+                ],
+                "args": {
+                  "feedback": "reviewer.verdict"
+                },
+                "exit_when": {
+                  "source": "attempt.passed == true",
+                  "roots": [
+                    "attempt"
+                  ],
+                  "digest": "b707e3923259e94f203a322ec06f7be5d99dfe98319a2cf2dc9796466dfff682"
+                },
+                "on_exhausted": "continue"
+              },
+              "capability_refs": []
+            },
+            {
+              "id": "reward",
+              "kind": "task",
+              "escape": {
+                "kind": "llm_predicate",
+                "impl_ref": "packages/swarmkit@1.0.0/hatches/reward_fn.py",
+                "reason": "任务成功判据/测试通过率来自 DSL 之外的评测器，需任意回调挂载点（卡 ⑥b-3）",
+                "owner": "eval-team",
+                "share_budget_pct": 8
+              },
+              "capability_refs": []
+            }
+          ],
+          "edges": [
+            {
+              "from": "aggregate",
+              "output": "best",
+              "to": "decide",
+              "input": "best",
+              "checkpoint": false
+            },
+            {
+              "from": "aggregate",
+              "output": "stats",
+              "to": "decide",
+              "input": "stats",
+              "checkpoint": false
+            },
+            {
+              "from": "decide",
+              "output": "decision",
+              "to": "reward",
+              "input": "decision",
+              "checkpoint": false
+            },
+            {
+              "from": "dispatch",
+              "output": "worklist",
+              "to": "execute_map",
+              "input": "steps",
+              "checkpoint": false
+            },
+            {
+              "from": "execute_map",
+              "output": "results",
+              "to": "aggregate",
+              "input": "results",
+              "checkpoint": false
+            },
+            {
+              "from": "execute_map",
+              "output": "results",
+              "to": "memory",
+              "input": "results",
+              "checkpoint": false
+            },
+            {
+              "from": "execute_map",
+              "output": "results",
+              "to": "reviewer",
+              "input": "results",
+              "checkpoint": false
+            },
+            {
+              "from": "graph_edit",
+              "output": "candidate",
+              "to": "graph_value",
+              "input": "candidate",
+              "checkpoint": false
+            },
+            {
+              "from": "graph_value",
+              "output": "nested",
+              "to": "planner",
+              "input": "spec",
+              "checkpoint": false
+            },
+            {
+              "from": "memory",
+              "output": "mem",
+              "to": "reviewer",
+              "input": "mem",
+              "checkpoint": false
+            },
+            {
+              "from": "optimize",
+              "output": "proposal",
+              "to": "graph_edit",
+              "input": "proposal",
+              "checkpoint": false
+            },
+            {
+              "from": "planner",
+              "output": "plan",
+              "to": "reviewer",
+              "input": "plan",
+              "checkpoint": false
+            },
+            {
+              "from": "planner",
+              "output": "steps",
+              "to": "dispatch",
+              "input": "steps",
+              "checkpoint": false
+            },
+            {
+              "from": "reviewer",
+              "output": "verdict",
+              "to": "aggregate",
+              "input": "verdict",
+              "checkpoint": false,
+              "guard": {
+                "source": "!((reviewer.verdict.pass == false))",
+                "roots": [
+                  "reviewer"
+                ],
+                "digest": "d29a764232aad6bf6f3df9a3e0dcda2f84d5aa43b104126824758003d9659315"
+              }
+            },
+            {
+              "from": "reviewer",
+              "output": "verdict",
+              "to": "revise",
+              "input": "verdict",
+              "checkpoint": false,
+              "guard": {
+                "source": "(reviewer.verdict.pass == false)",
+                "roots": [
+                  "reviewer"
+                ],
+                "digest": "43b8964ea7e325ade1fc74c4249cab5fe03a0bb7d0779b3bf330711ad17fbd95"
+              }
+            },
+            {
+              "from": "revise",
+              "output": "revision",
+              "to": "reviewer",
+              "input": "patch",
+              "checkpoint": false
+            },
+            {
+              "from": "reward",
+              "output": "reward",
+              "to": "optimize",
+              "input": "reward",
+              "checkpoint": false
+            }
+          ]
+        },
+        "gptswarm_candidate_graph/search/execute_map": {
+          "graph_version": "1.0",
+          "entry": "worker",
+          "nodes": [
+            {
+              "id": "py_node",
+              "kind": "task",
+              "escape": {
+                "kind": "program_synthesis",
+                "impl_ref": "packages/swarmkit@1.0.0/hatches/py_node.py",
+                "reason": "GPTSwarm 节点=任意 callable：DSL 只能声明结构不能声明函数体，候选图中的自定义节点体走逃逸（卡 ⑥b-4）",
+                "owner": "lang-team",
+                "share_budget_pct": 6
+              },
+              "capability_refs": []
+            },
+            {
+              "id": "tool_exec",
+              "kind": "task",
+              "capability_refs": []
+            },
+            {
+              "id": "worker",
+              "kind": "task",
+              "capability_refs": []
+            }
+          ],
+          "edges": [
+            {
+              "from": "tool_exec",
+              "output": "observation",
+              "to": "py_node",
+              "input": "observation",
+              "checkpoint": false
+            },
+            {
+              "from": "worker",
+              "output": "action",
+              "to": "tool_exec",
+              "input": "action",
+              "checkpoint": false
+            }
+          ]
+        },
+        "gptswarm_candidate_graph/search/revise": {
+          "graph_version": "1.0",
+          "entry": "regenerate",
+          "nodes": [
+            {
+              "id": "critique",
+              "kind": "task",
+              "capability_refs": []
+            },
+            {
+              "id": "regenerate",
+              "kind": "task",
+              "capability_refs": []
+            },
+            {
+              "id": "verdict_gate",
+              "kind": "gate",
+              "capability_refs": []
+            }
+          ],
+          "edges": [
+            {
+              "from": "critique",
+              "output": "opinion",
+              "to": "verdict_gate",
+              "input": "opinion",
+              "checkpoint": false
+            },
+            {
+              "from": "regenerate",
+              "output": "patch",
+              "to": "critique",
+              "input": "patch",
+              "checkpoint": false
+            },
+            {
+              "from": "verdict_gate",
+              "output": "opinion",
+              "to": "regenerate",
+              "input": "feedback",
+              "checkpoint": false,
+              "guard": {
+                "source": "(verdict_gate.passed == false)",
+                "roots": [
+                  "verdict_gate"
+                ],
+                "digest": "dad6c9ad82c99dd848d234c2526000708cd0162ad792f2fa1e18599430189dd0"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "interface": {
+      "input_type": "swarm_input",
+      "output_type": "decision",
+      "output_from": "search",
+      "intent": "GPTSwarm：agent=图（节点=零状态操作，边=信息流，边即上下文可见性的唯一来源）。本配方是「候选图模板 + 图搜索外循环」：规划→并行执行→记忆→评审→反思修订→投票汇聚→决策，外接优化器/图编辑算子/外部奖励/任意 Python 节点体/动态调度/图作为值 六项定义性机制走 L4 逃逸舱（escape.kind 七类词表记账）。"
+    },
+    "types": {
+      "action_request": {
+        "properties": {
+          "args": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool",
+          "args"
+        ],
+        "type": "object"
+      },
+      "decision": {
+        "properties": {
+          "confidence": {
+            "type": "integer"
+          },
+          "final": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "final",
+          "confidence"
+        ],
+        "type": "object"
+      },
+      "graph_spec": {
+        "properties": {
+          "edge_count": {
+            "type": "integer"
+          },
+          "node_count": {
+            "type": "integer"
+          },
+          "ref": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "node_count",
+          "edge_count"
+        ],
+        "type": "object"
+      },
+      "observation": {
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "output": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "output"
+        ],
+        "type": "object"
+      },
+      "plan": {
+        "properties": {
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary"
+        ],
+        "type": "object"
+      },
+      "reward_value": {
+        "properties": {
+          "plateau": {
+            "type": "boolean"
+          },
+          "score": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "score",
+          "plateau"
+        ],
+        "type": "object"
+      },
+      "step_result": {
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "output": {
+            "type": "string"
+          },
+          "score": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ok",
+          "output",
+          "score"
+        ],
+        "type": "object"
+      },
+      "step_spec": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "instruction": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "instruction"
+        ],
+        "type": "object"
+      },
+      "swarm_input": {
+        "properties": {
+          "mode": {
+            "type": "string"
+          },
+          "task": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task",
+          "mode"
+        ],
+        "type": "object"
+      },
+      "tally_result": {
+        "properties": {
+          "answers": {
+            "type": "integer"
+          },
+          "top_count": {
+            "type": "integer"
+          },
+          "top_share_milli": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "answers",
+          "top_count",
+          "top_share_milli"
+        ],
+        "type": "object"
+      },
+      "verdict": {
+        "properties": {
+          "issues": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "pass": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "pass",
+          "issues"
+        ],
+        "type": "object"
+      }
+    },
+    "stores": {
+      "graph_archive": {
+        "name": "graph_archive",
+        "kind": "collection",
+        "item": "graph_spec",
+        "writer": "search.graph_edit",
+        "lifecycle": "run",
+        "retention": {
+          "max_items": 64
+        },
+        "eval_input": false
+      }
+    },
+    "node_exec": [
+      {
+        "node_id": "search",
+        "unit": null,
+        "components": {
+          "model_route": null,
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "decision",
+            "is_final": true,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "search.aggregate",
+        "unit": null,
+        "components": {
+          "model_route": null,
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "best",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          },
+          {
+            "name": "stats",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "search.decide",
+        "unit": null,
+        "components": {
+          "model_route": "route.main@1",
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [
+          {
+            "id": "decide_calls",
+            "dimension": "model_calls",
+            "cap": 40
+          }
+        ],
+        "artifact_contract": [
+          {
+            "name": "decision",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "search.dispatch",
+        "unit": null,
+        "components": {
+          "model_route": null,
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "worklist",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "search.execute_map",
+        "unit": null,
+        "components": {
+          "model_route": null,
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "results",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "search.execute_map.py_node",
+        "unit": null,
+        "components": {
+          "model_route": null,
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "result",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "search.execute_map.tool_exec",
+        "unit": null,
+        "components": {
+          "model_route": null,
+          "loop_policy": null,
+          "memory": [],
+          "tools": [
+            {
+              "reference": "pkg.swarmkit.tools@1",
+              "effect_class": "external_once"
+            }
+          ],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "observation",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "search.execute_map.worker",
+        "unit": null,
+        "components": {
+          "model_route": "route.main@1",
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "action",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "search.graph_edit",
+        "unit": null,
+        "components": {
+          "model_route": null,
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "candidate",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "search.graph_value",
+        "unit": null,
+        "components": {
+          "model_route": null,
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "nested",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "search.memory",
+        "unit": null,
+        "components": {
+          "model_route": "route.cheap@1",
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "mem",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "search.optimize",
+        "unit": null,
+        "components": {
+          "model_route": null,
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "proposal",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "search.planner",
+        "unit": null,
+        "components": {
+          "model_route": "route.main@1",
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "plan",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": {
+              "envelope_of": "plan"
+            }
+          },
+          {
+            "name": "steps",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "search.reviewer",
+        "unit": null,
+        "components": {
+          "model_route": "route.main@1",
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "verdict",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "search.revise",
+        "unit": null,
+        "components": {
+          "model_route": null,
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "revision",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "search.revise.critique",
+        "unit": null,
+        "components": {
+          "model_route": "route.main@1",
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "opinion",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "search.revise.regenerate",
+        "unit": null,
+        "components": {
+          "model_route": "route.main@1",
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "patch",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "search.revise.verdict_gate",
+        "unit": null,
+        "components": {
+          "model_route": null,
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "opinion",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      },
+      {
+        "node_id": "search.reward",
+        "unit": null,
+        "components": {
+          "model_route": null,
+          "loop_policy": null,
+          "memory": [],
+          "tools": [],
+          "context_compaction": null
+        },
+        "budget": [],
+        "artifact_contract": [
+          {
+            "name": "reward",
+            "is_final": false,
+            "qualified_by": null,
+            "provenance": null
+          }
+        ],
+        "retry": null
+      }
+    ],
+    "budget": {
+      "budgets": [
+        {
+          "id": "cost_cap",
+          "dimension": "cents",
+          "scope": "plan",
+          "cap": 5000
+        },
+        {
+          "id": "decide_calls",
+          "dimension": "model_calls",
+          "scope": "node:search.decide",
+          "cap": 40
+        },
+        {
+          "id": "exec_calls",
+          "dimension": "tool_calls",
+          "scope": "map:search.execute_map",
+          "cap": 500
+        },
+        {
+          "id": "search_turns",
+          "dimension": "turns",
+          "scope": "loop:search",
+          "cap": 2000
+        }
+      ],
+      "stop": [
+        {
+          "when": {
+            "source": "steps.iterations >= 40",
+            "roots": [
+              "steps"
+            ],
+            "digest": "90cc253d426960fbbbabaccb50e51a5074a7a6eaf049264a83d516f382e5959f"
+          },
+          "outcome": "completed"
+        },
+        {
+          "when": {
+            "source": "budget.cents_spent >= budget.cents_cap",
+            "roots": [
+              "budget"
+            ],
+            "digest": "c14f82889347ef4739d6e78a7d64a20a9d04eeb8df059cb6799275566c77c6f0"
+          },
+          "outcome": "completed"
+        }
+      ],
+      "failures": [
+        {
+          "class": "tool_error",
+          "retry": {
+            "max": 2,
+            "backoff_ms": 500
+          },
+          "route": "same_node",
+          "feedback": "error_observation"
+        },
+        {
+          "class": "schema_invalid",
+          "retry": {
+            "max": 2,
+            "backoff_ms": 0
+          },
+          "route": "next_iteration"
+        },
+        {
+          "class": "gate_refused",
+          "route": "next_iteration"
+        },
+        {
+          "class": "budget_exhausted",
+          "terminal": true,
+          "outcome": "completed"
+        }
+      ]
+    },
+    "resources": {
+      "gates": [],
+      "limits": []
+    },
+    "observation": {
+      "span_tree": [
+        "invoke_workflow",
+        "invoke_agent",
+        "chat",
+        "execute_tool"
+      ],
+      "ctx_propagation": "env",
+      "otel": {
+        "enabled": false,
+        "endpoint": null,
+        "batch_size": 512
+      },
+      "events": {
+        "root_env": "AF_OBS_ROOT",
+        "line": "",
+        "index": true,
+        "manifest": true
+      },
+      "mes": {
+        "endpoint_ref": "env:MES_CH_URL",
+        "database": "af_mes",
+        "line_id": "",
+        "station_id": ""
+      }
+    },
+    "recovery": {
+      "node_retry": null,
+      "resume_source": [
+        "run_store",
+        "record_stream",
+        "mes_events"
+      ],
+      "safety_points": [
+        {
+          "loop_node": "search",
+          "node": "revise.verdict_gate",
+          "kind": "gate"
+        },
+        {
+          "loop_node": "search.revise",
+          "node": "verdict_gate",
+          "kind": "gate"
+        }
+      ],
+      "failures": [
+        {
+          "class": "tool_error",
+          "retry": {
+            "max": 2,
+            "backoff_ms": 500
+          },
+          "route": "same_node",
+          "feedback": "error_observation"
+        },
+        {
+          "class": "schema_invalid",
+          "retry": {
+            "max": 2,
+            "backoff_ms": 0
+          },
+          "route": "next_iteration"
+        },
+        {
+          "class": "gate_refused",
+          "route": "next_iteration"
+        },
+        {
+          "class": "budget_exhausted",
+          "terminal": true,
+          "outcome": "completed"
+        }
+      ]
+    },
+    "escapes": {
+      "search.dispatch": {
+        "kind": "runtime_context_mutation",
+        "impl_ref": "packages/swarmkit@1.0.0/hatches/dispatch.py",
+        "reason": "静态 map 只能表达静态扇出；动态 fan-out、节点级超时取消与异步调度语义在 DSL 之外（卡 ⑥b-5）",
+        "owner": "lang-team",
+        "share_budget_pct": 6
+      },
+      "search.execute_map.py_node": {
+        "kind": "program_synthesis",
+        "impl_ref": "packages/swarmkit@1.0.0/hatches/py_node.py",
+        "reason": "GPTSwarm 节点=任意 callable：DSL 只能声明结构不能声明函数体，候选图中的自定义节点体走逃逸（卡 ⑥b-4）",
+        "owner": "lang-team",
+        "share_budget_pct": 6
+      },
+      "search.graph_edit": {
+        "kind": "program_synthesis",
+        "impl_ref": "packages/swarmkit@1.0.0/hatches/graph_edit.py",
+        "reason": "图编辑算子（增删节点/增删边/改节点依赖/替换节点实现）在运行时产出新图；静态 DSL 无法表达「产出一张新图」（卡 ⑥b-1）",
+        "owner": "lang-team",
+        "share_budget_pct": 10
+      },
+      "search.graph_value": {
+        "kind": "program_synthesis",
+        "impl_ref": "packages/swarmkit@1.0.0/hatches/graph_value.py",
+        "reason": "图可被嵌套、复用、作为另一张图的节点；DSL 需把「图」提升为一等值类型，否则逃逸（卡 ⑥b-6）",
+        "owner": "lang-team",
+        "share_budget_pct": 4
+      },
+      "search.optimize": {
+        "kind": "meta_loop",
+        "impl_ref": "packages/swarmkit@1.0.0/hatches/policy_search.py",
+        "reason": "REINFORCE 类无梯度搜索 + 精英保留 + 回退整体在 DSL 之外，以「调用外部优化器并把结果作为子图回填」接入（卡 ⑥b-2）",
+        "owner": "rl-team",
+        "share_budget_pct": 15
+      },
+      "search.reward": {
+        "kind": "llm_predicate",
+        "impl_ref": "packages/swarmkit@1.0.0/hatches/reward_fn.py",
+        "reason": "任务成功判据/测试通过率来自 DSL 之外的评测器，需任意回调挂载点（卡 ⑥b-3）",
+        "owner": "eval-team",
+        "share_budget_pct": 8
+      }
+    }
+  }
+}
