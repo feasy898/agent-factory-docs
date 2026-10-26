@@ -2,7 +2,7 @@
 
 > 你是从本工作区派发的 agent。本文件是你与其他所有 agent 的共同契约。
 > **本工作区是全网（tailnet）开发事实的单一权威（Single Source of Truth）。**
-> 最后更新：2026-10-27（红队复批 docs 域：文首孤行更新记录归位文末 §六表——红队 W2-C-45 勘误，内容口径零改动）｜更新规则见文末
+> 最后更新：2026-10-27（红队复批 docs 域：文首孤行更新记录归位文末 §六表——红队 W2-C-45 勘误，内容口径零改动；红队 W2 修复批 af-order 域：速查表 ADR 指针改指 phase2 主线+redteam 修复分支——W2-C47）｜更新规则见文末
 
 ---
 
@@ -42,7 +42,7 @@
 | 某组件建到什么程度了 | `状态/组件建设状态.md` |
 | 计划现在到底说什么 | `计划/00-总纲.md` + `计划/变更日志.md` |
 | 为什么当初这么定 | `设计/`（拍板版=根本法；实施方案=裁决与证据链；外部项目研究=默认拒绝审计） |
-| 第二阶段 DSL/ADR 资料在哪 | af 工作树 `~/workspace/af-wt-phase2-order/docs/adr/`（ADR-001~009，分支 phase2-order）+ `计划/研究组/DSL-*`（必要性/表达力/语法提案） |
+| 第二阶段 DSL/ADR 资料在哪 | af 工作树 `~/workspace/af-wt-phase2-execline/docs/adr/`（ADR-001~010，分支 phase2）+ 红队修复分支 `~/workspace/af-wt-redteam/docs/adr/`（ADR-001~012 全集，含 011-redteam-w1-fixes / 012-redteam-w2-fixes，分支 phase2-redteam-fixes；**勿再把 `~/workspace/af-wt-phase2-order` 当资料源**——实测已在 phase2-g2b-hyg 分支且止于 009）+ `计划/研究组/DSL-*`（必要性/表达力/语法提案） |
 | GitHub 备份 | `状态/权限与账户.md`（github.com/Feasy898/af 过滤镜像 + github.com/Feasy898/agent-factory-docs 文档备份；PAT 走 askpass 现取） |
 | 在飞/退役状态 | `计划/研究组/在飞bench盘点-20261024.md`（退役前置锁定：什么还在飞、什么将并入 af 底座） |
 
@@ -84,3 +84,4 @@ agent黑灯工厂/
 | 2026-10-25 | 文档终态员（第二阶段收官刷新） | 收官刷新：①「最后更新」改记第二阶段收官；②文档地图增第二阶段终验终裁文书群入口行。速查表与硬纪律零改动。依据：计划/研究组/G5-门终裁-20261025.md §四（六门全绿+剩余收口项）、A1-稳定性验收-终验-20261025.md §四（5/5）、G4-门终裁-20261025.md、G2G3-放行裁决-20261024.md（均 ls 实测在场） |
 | 2026-10-26 | 红队修复员（W1 修复批） | 硬纪律 5 勘误：`ci/run.sh` 完成判据「六门」→「九门」（step1-8 硬门 + step9 FV advisory；step1 含 K5 判分链路径 lint）——「六门」为 10-19 口径，10-25 起九步；其余速查表/硬纪律零改动【2026-10-27 红队复批注：行内「step1 含 K5」口径已收窄——K5 仅在未合流 phase2-redteam-fixes 分支（见硬纪律 5 内 W2-C45 勘误），本行保留当时原貌】 | af/ci/out/SUMMARY.txt 九步；红队 W1-C53 裁定 |
 | 2026-10-27 | 红队复批修复员（docs 域，k3.1-pro 复裁 14 条） | 结构修复（红队 W2-C-45）：原悬于文件首行（`# AGENT.md` 标题之上）的 2026-10-26 更新记录行归位至本表——孤行在标题上方渲染为无表头孤表、且违反更新记录在文末约定；本表自此为唯一更新记录位，内容零丢失 | 红队复批裁定书 W2-C-45；head -1 实测 | |
+| 2026-10-27 | 红队修复员（W2 修复批，af-order 域） | 速查表「第二阶段 DSL/ADR 资料在哪」ADR 指针勘误（红队 W2-C47）：原指 `~/workspace/af-wt-phase2-order`（实测 66fdc5a 已在 phase2-g2b-hyg 分支、非 phase2-order，且 ADR 止于 001~009，接不上 00-总纲 §0 已引用的 ADR-010/011）→ 改指 `~/workspace/af-wt-phase2-execline`（分支 phase2，ADR-001~010）+ 红队修复分支 `~/workspace/af-wt-redteam`（分支 phase2-redteam-fixes，ADR-001~012 全集含 011/012），行内注明 phase2-order 勿再当资料源 | git worktree list（af-wt-phase2-order=66fdc5a[phase2-g2b-hyg]）+ 三处 ls docs/adr/ 亲测（phase2-order 001~009 / phase2-execline 001~010 / redteam 001~012） |
