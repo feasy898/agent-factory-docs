@@ -110,21 +110,52 @@ watch/dash/cb-run/image-feed/mcode-dispatch/ch-mes-local/anolis-proxy-8124）：
 ### 4. MES 旁路废除核对
 
 - 旁路 = bench-mes.py `ch_insert` 直 INSERT（盘点 §MES：调度器直写 CH HTTP）；
-- 废除判据三面：①tools/ 归档后无活动写入者（`grep -rn ch_insert tools/*.py`
-  仅命中归档件）；②af 线 MES 唯一经 af-execline `mes_ch.rs`（CH sink=
+- 废除判据三面（红队 W1-C16 修订口径，2026-10-26）：
+  ①tools/ 归档后无**活动**写入者——判据命令改
+  `grep -rn 'INSERT INTO af_mes' tools/*.py`（按 SQL 语句匹配，不按函数名：
+  原 `grep -rn ch_insert` 对 keepalive `mes_event()`（factory-keepalive.py，
+  自注「直 INSERT，factory-sched ch_insert 同款」）结构性失明——它是观察期内
+  唯一活跃的 Python 直 INSERT 写入者，属同族旁路，登记技术债（见
+  计划/技术债登记.md D-45）待走非旁路通道）；
+  ②af 线 MES 唯一经 af-execline `mes_ch.rs`（CH sink=
   retry_outbox+event_id 对账+差量送批，F-第四单 A/B 实证失败路径 3 行读回）；
-  ③mingda CH `af_mes.mes_event` 表在旁路停用后只余 af 线 station_id=
-  `af-order-cli` 新事件（SELECT 采样核对）。
+  ③mingda CH `af_mes.mes_event` 表在旁路停用后**业务线零新行**（SELECT 采样
+  核对）——记账面非业务旁路的已知白名单枚举：退役批停机事件 8 行
+  （station_id=main-sched/exp-sched/cb-run/image-feed/mcode-dispatch/
+  ch-mes-local/anolis-proxy-8124/factory-keepalive，2026-10-26 01:03:20）、
+  keepalive 重启事件 1 行（keepalive_restart，01:05:53）、历史伪造时钟行 7 行
+  （已登记）。原判据「只余 station_id=af-order-cli 新事件」被上列 9 行证伪，
+  按实况重述（巡检日志:427「三面核对过」与变更日志:165 同口径收口）。
 
-## 四、一行回滚命令（ADR-008 §4：切流保留回滚一行）
+## 四、回滚命令（ADR-008 §4：切流保留回滚；红队 W1-C15 改写，2026-10-26）
+
+**前提**：§三-2 已把 keepalive 的 TARGETS/LAUNCH_PLAN/CHECKS 改写为仅看护
+af 执行面（watch/dash/af-execline/mes-ch 四对象）——直接拉起现行脚本**只能
+复活看护面，不能复活已退役的 sched/cb-run/image-feed/mcode-dispatch 旧链**。
+回滚旧链必须先还原改写前备份（改写批留存于
+`工具状态备份/factory-keepalive.py.pre-bench-retire-20261026`）：
 
 ```bash
-cd /home/pan-ding/workspace/agent黑灯工厂 && nohup python3 tools/factory-keepalive.py >> /tmp/factory-keepalive.log 2>&1 & echo $! > /tmp/factory-keepalive.pid
+# ① 还原改写前正本（TARGETS 含 sched/cb-run 全链的版本）：
+cp 工具状态备份/factory-keepalive.py.pre-bench-retire-20261026 tools/factory-keepalive.py
+# ② 裸 nohup 拉起（self_guard 自写 pid 文件；不得手工 echo $! 写 pid——
+#    与 self_guard（factory-keepalive.py:1377-1388）竞态自撞 exit 3，
+#    退役执行批两次实证）：
+cd /home/pan-ding/workspace/agent黑灯工厂 && nohup python3 tools/factory-keepalive.py >> /tmp/factory-keepalive.log 2>&1 &
 ```
 
-（keepalive 单进程即可按 TARGETS 复活 sched/cb-run 全链——这正是停机顺序必须
-「keepalive 最后停」的原因；回滚后 5 分钟内 `tail /tmp/factory-keepalive.log`
-核对看护轮次与对象活态。观察期内每停一个对象记一条 MES 事件 + 巡检日志行。）
+> **勘误（红队 W1-C15，2026-10-26）**：原「一行回滚命令」只拉起 keepalive，
+> 而其说明文仍称「keepalive 单进程即可按 TARGETS 复活 sched/cb-run 全链」
+> ——该表述在 §三-2 落码（TARGETS 只剩四看护对象）后即已失效：旧对象函数
+> 仅为无引用死码，回滚行无法复活旧链。本节改写为「先还原备份再拉起」，
+> ADR-008 §4 的回滚保障据此执行。
+
+（回滚后 5 分钟内 `tail /tmp/factory-keepalive.log` 核对看护轮次与对象活态。
+**回滚演练判据（红队 W1-C15 fixHint，2026-10-26）：须核对旧 TARGETS 实际恢复——
+`grep -n '^TARGETS' tools/factory-keepalive.py` 应回到九对象行（含 main-sched/
+exp-sched/cb-run/image-feed），且日志出现旧对象拉活/判活行；只看到 keepalive
+进程起来不算回滚成功（那可能仍是四对象观察期形态）。**
+观察期内每停一个对象记一条 MES 事件 + 巡检日志行。）
 
 ## 五、12 阻塞臂待运营者裁决（占位登记，ADR-008 §3-3）
 

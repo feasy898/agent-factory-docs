@@ -1,8 +1,25 @@
 #!/usr/bin/env python3
 """factory-keepalive.py — 黑灯工厂守护进程的守护（keepalive 常驻，30s 一轮）。
 
+【2026-10-26 §三-2 退役改造（ADR-008，运营者裁决 B·放弃 D1/D3 全量臂并退役）】
+旧 bench 链（factory-sched/mcode-dispatch/cb-run/ch-mes-local 锚/anolis-proxy-8124 等）
+已退役，本脚本看护清单收敛为观察期 4 对象：
+
+  watch        python3 tools/factory-watch.py（判据不变：进程在+watch-state.json<300s）
+  dash         python3 -m http.server 8790（看板，判据=进程在）
+  af-execline  af 统一执行面判活（订单驱动非守护）：af-order/af-execline 进程在场
+               或 WS/af-state/orders/ 最近订单 ledger 心跳<72h；空闲=amber 报警不拉起
+  mes-ch       mingda MES（100.64.0.2:15221）查询级连通探活（原 ch-mes-local 探针
+               原样复用，仅更名登记）；失联=四类告警码只报警不拉起
+
+旧 9 对象（main-sched/exp-sched/cb-run/image-feed/mcode-dispatch/ch-mes-local/
+anolis-proxy-8124）的判活/拉起函数保留为无引用死码，待观察期满文件归档批
+（参考/legacy/）一并清理——见 计划/研究组/退役执行记录-20261026.md。
+停机登记：8 对象 MES kind=retired（line_id=bench-retire，2026-10-26 01:03）。
+
 背景（2026-10-21 复盘，技术债 D-3 韧性层）：tailnet 闪断把主/实验线调度器与 cb-run
-杀了 50 分钟无人自动拉起（靠人工巡检发现）。本脚本看护下列常驻对象，死了按正确姿势拉起：
+杀了 50 分钟无人自动拉起（靠人工巡检发现）。下述 9 对象描述为 2026-10-21~10-24
+历史形态（退役存档参考，现行看护对象以上表为准）：
 
   main-sched   python3 tools/factory-sched.py（无 AF_SCHED_*）
                判据=进程在 且 /tmp/factory-status.json mtime<300s；任一失效→杀残进程重启
@@ -815,7 +832,9 @@ def mcode_dispatch_drained():
 
 
 # 完成态分支登记表（防抖超限态下仍放行完成态判定；非完成态不受影响）
-DRAIN_PROBES = {"mcode-dispatch": mcode_dispatch_drained}
+# 2026-10-26 §三-2：mcode-dispatch 随旧链退役移出看护表，本表清空
+# （mcode_dispatch_drained 函数保留为死码，随归档批清理）。
+DRAIN_PROBES = {}
 
 
 def fix_mcode_dispatch(dry, t, deb):
@@ -927,15 +946,17 @@ def ch_mes_probe(timeout=CHMES_PROBE_TIMEOUT, url=None, auth=None, sql=None):
         return False, "conn", f"未分类异常: {e!r}"
 
 
-def check_ch_mes_local(t):
+def check_mes_ch(t):
+    """mes-ch（mingda MES 查询级探针，2026-10-26 §三-2 由 ch-mes-local 更名，探针不变）。"""
     global last_chmes_fail
     ok, cls, detail = ch_mes_probe()
     last_chmes_fail = None if ok else (cls, detail)
     return ok, detail
 
 
-def fix_ch_mes_local(dry, t, deb):
+def fix_mes_ch(dry, t, deb):
     """失联处置=只报警不拉起（跨机自动拉起越权，不做；恢复手段见 CHMES_RECOVERY）。
+    2026-10-26 §三-2：由 fix_ch_mes_local 更名 mes-ch（探针/告警码/kind 全不变）。
     告警码按失败类别四选一（补丁④）；30min 去重，类别翻转立即重报（同窗内 conn 翻
     query 是质变，不该被去重吞掉）。"""
     global last_chmes_alarm, last_chmes_alarm_cls
@@ -943,16 +964,16 @@ def fix_ch_mes_local(dry, t, deb):
     code = CHMES_ALARM_CODES.get(cls, CHMES_ALARM_CODES["conn"])
     rec = CHMES_RECOVERY.get(cls, CHMES_RECOVERY["conn"])
     if dry:
-        klog("ch-mes-local", f"[dry-run] 查询探针失联（类别={cls} 码={code}：{detail}）"
-                             f"——将报警（klog + {ALARMS_LOG} + MES kind=ch_mes_down，"
-                             f"{CHMES_DEDUP_S}s 去重），不拉起；{rec}")
+        klog("mes-ch", f"[dry-run] 查询探针失联（类别={cls} 码={code}：{detail}）"
+                       f"——将报警（klog + {ALARMS_LOG} + MES kind=ch_mes_down，"
+                       f"{CHMES_DEDUP_S}s 去重），不拉起；{rec}")
         return
     if t - last_chmes_alarm < CHMES_DEDUP_S and cls == last_chmes_alarm_cls:
         return
     last_chmes_alarm, last_chmes_alarm_cls = t, cls
-    klog("ch-mes-local", f"ALARM MES({CH}) 查询探针失联（类别={cls} 码={code}）：{detail}"
-                         f"——不自动重启；{rec}；bench-mes 入库/sched 落账将失败，"
-                         f"需人工介入（{CHMES_DEDUP_S}s 内同类别不重复报）")
+    klog("mes-ch", f"ALARM MES({CH}) 查询探针失联（类别={cls} 码={code}）：{detail}"
+                   f"——不自动重启；{rec}；af 线 MES 落账将失败，"
+                   f"需人工介入（{CHMES_DEDUP_S}s 内同类别不重复报）")
     try:
         with open(ALARMS_LOG, "a", encoding="utf-8") as f:
             f.write(json.dumps({
@@ -962,7 +983,7 @@ def fix_ch_mes_local(dry, t, deb):
             }, ensure_ascii=False) + "\n")
     except Exception:
         pass
-    mes_event("ch-mes-local", "ch_mes_down")
+    mes_event("mes-ch", "ch_mes_down")
 
 
 # ---------- anolis-proxy-8124（D-43 归还组，2026-10-24：anolis 8124 净化白名单代理）----------
@@ -1064,6 +1085,87 @@ def fix_anolis_proxy8124(dry, t, deb):
         last_spawn[PROXY8124_NAME] = t
         mes_event(PROXY8124_NAME, "keepalive_restart")
     last_proxy8124_fail = None
+
+
+# ---------- af-execline（2026-10-26 §三-2 退役改造新增：af 统一执行面判活） ----------
+# 背景：旧 bench 链退役（ADR-008，runbook §三-2）。af 执行面=订单驱动（af-order submit
+# → af-execline 执行 → af-mes 记账），非守护进程——判活取双通道：①/proc 扫描 argv
+# basename∈{af-order,af-execline}（释放件与 cargo run 形态同 basename）；②WS/af-state/
+# orders/ 最新订单目录 mtime（订单生命周期内落件即心跳）。心跳窗 72h=订单节奏日级+
+# 观察期跨天判据 3 天（施工参数，登记 退役执行记录-20261026.md，可调）。
+# 失联处置=只报警不拉起（amber 级：订单驱动面空闲≠故障；30min 去重）——klog+
+# alarms.log（code=af-execline-idle）+ MES kind=af_plane_idle（写失败不致命）。
+AF_EXEC_NAME = "af-execline"
+AF_STATE_ORDERS = f"{WS}/af-state/orders"
+AF_LEDGER_FRESH_S = 72 * 3600
+AF_IDLE_ALARM_DEDUP_S = 1800
+last_af_idle_alarm = 0.0
+
+
+def af_plane_pids():
+    """af-order/af-execline 进程扫描（不限 python——释放件是原生二进制）。"""
+    out = []
+    for ent in os.listdir("/proc"):
+        if not ent.isdigit():
+            continue
+        argv = pid_argv(int(ent))
+        if not argv:
+            continue
+        if os.path.basename(argv[0]) in ("af-order", "af-execline") or \
+                any(os.path.basename(a) in ("af-order", "af-execline") for a in argv[1:]):
+            out.append(int(ent))
+    return sorted(out)
+
+
+def latest_order_ledger_age():
+    """af-state/orders/ 最新订单目录 mtime 距今秒数；目录缺失返回 None。"""
+    newest = 0.0
+    try:
+        for od in os.listdir(AF_STATE_ORDERS):
+            try:
+                newest = max(newest, os.stat(os.path.join(AF_STATE_ORDERS, od)).st_mtime)
+            except OSError:
+                continue
+    except OSError:
+        return None
+    return (time.time() - newest) if newest else None
+
+
+def check_af_execline(t):
+    pids = af_plane_pids()
+    if pids:
+        return True, f"进程={pids}（订单在飞）"
+    age = latest_order_ledger_age()
+    fresh = age is not None and age < AF_LEDGER_FRESH_S
+    if age is None:
+        return False, "订单 ledger 目录缺失（af-state/orders/ 不存在）"
+    return fresh, f"无进程；订单 ledger 心跳 {int(age)}s 前（窗 {AF_LEDGER_FRESH_S}s）"
+
+
+def fix_af_execline(dry, t, deb):
+    """订单驱动面空闲：只报警不拉起（amber，30min 去重）。恢复=经 af-order 正常下单。"""
+    global last_af_idle_alarm
+    if dry:
+        klog(AF_EXEC_NAME, "[dry-run] af 执行面无进程且订单 ledger 心跳超窗——将报警"
+                           f"（amber，{AF_IDLE_ALARM_DEDUP_S}s 去重），不拉起（订单驱动型非守护）")
+        return
+    if t - last_af_idle_alarm < AF_IDLE_ALARM_DEDUP_S:
+        return
+    last_af_idle_alarm = t
+    klog(AF_EXEC_NAME, "ALARM af 执行面空闲（无 af-order/af-execline 进程且订单 ledger 心跳>"
+                       f"{AF_LEDGER_FRESH_S // 3600}h）——不自动拉起（订单驱动型，空闲≠故障）；"
+                       "恢复=经 af-order 正常下单（下单即恢复心跳）")
+    try:
+        with open(ALARMS_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "ts": now_s(), "level": "amber", "code": "af-execline-idle",
+                "message": "af 执行面空闲：无 af-order/af-execline 进程且订单 ledger 心跳超 "
+                           f"{AF_LEDGER_FRESH_S // 3600}h；订单驱动型不自动拉起，恢复=经 af-order 正常下单",
+                "since": time.strftime("%F %T", time.localtime(t)),
+            }, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    mes_event(AF_EXEC_NAME, "af_plane_idle")
 
 
 # ---------- gc-watch（补丁③ R2：anolis 镜像池 GC 看护，本地判断+spawn 即返回） ----------
@@ -1189,40 +1291,25 @@ def gc_watch(dry=False):
 
 
 LAUNCH_PLAN = [
-    ("main-sched", ["python3", "tools/factory-sched.py"], "/tmp/factory.log",
-     "env-=AF_SCHED_GRAPH/STATUS/LOG,BIN（缺省=主产线 af-bench fix1）；判据=进程+/tmp/factory-status.json<300s；"
-     "杀残后清 af-bench/cnb-relay 孤儿（ppid=1 且 exe=af-bench）"),
-    ("exp-sched", ["python3", "tools/factory-sched.py"], "/tmp/factory2.log",
-     f"env+={EXP_ENV}；判据=进程 env 含 AF_SCHED + /tmp/factory2-status.json<300s；"
-     f"杀残后清孤儿（exe={EXP_ENV['BIN']} 或 cnb-relay.py）；BIN 缺失则只报警"),
     ("watch", ["python3", "tools/factory-watch.py"], "/tmp/factory-watch.log",
      f"env+={WATCH_ENV}；判据=进程+watch-state.json<300s"),
     ("dash", ["python3", "-m", "http.server", DASH_PORT,
               "--bind", "127.0.0.1", "--directory", DASH_DIR], "/tmp/factory-dash.log",
-     "watchdog 连带件：watch 拉起后若看板 8790 也死则一并拉（独立判活项）"),
-    ("cb-run", ["python3", "tools/cb-run.py", "run"], "/tmp/cb-run.log",
-     "拉起前清陈旧 /tmp/cb-run.pid（pid 不在或非 cb-run 进程才清）防其单实例守卫误拒"),
-    ("image-feed", ["python3", "tools/local-image-feed.py"], "/tmp/local-image-feed.log",
-     "仅当 120 名单缺镜像>0 才拉起；缺=0 视为正常完成退出不重启；docker 异常只报警"),
-    ("mcode-dispatch", ["python3", "tools/mcode-dispatch.py", "run"], "/tmp/mcode-dispatch.log",
-     "官方harness对照线；判据=dispatch.pid 活进程+heartbeat<2400s（单题 solve 最长 30min）；"
-     "重启幂等（state 断点+QUOTA 旗标+pidfile 单实例守卫）"),
-    ("ch-mes-local", ["curl", "-s", "-m", "5", "-u", "default:<0600凭据文件>",
-                      "http://100.64.0.2:15221/?query=SELECT%20count()%20FROM%20af_mes.mes_event%20WHERE%20occurred_at%20%3E%20now()%20-%20INTERVAL%201%20MINUTE"],
+     "看板：判据=8790 进程在；死则拉起（绑 127.0.0.1）"),
+    ("af-execline", ["stat", "-c", "%y", f"{WS}/af-state/orders"], "（不拉起，报警面）",
+     "af 统一执行面判活（2026-10-26 §三-2 新增，订单驱动非守护）：判活=af-order/af-execline "
+     "进程在场 或 af-state/orders/ 最新订单目录 mtime<72h（cmd 列=心跳等价查看命令）；"
+     "空闲=amber 报警不拉起（klog+alarms.log code=af-execline-idle+MES kind=af_plane_idle，"
+     "30min 去重）；恢复=经 af-order 正常下单"),
+    ("mes-ch", ["curl", "-s", "-m", "5", "-u", "default:<0600凭据文件>",
+                "http://100.64.0.2:15221/?query=SELECT%20count()%20FROM%20af_mes.mes_event%20WHERE%20occurred_at%20%3E%20now()%20-%20INTERVAL%201%20MINUTE"],
      str(ALARMS_LOG),
-     "只探活不拉起（补丁②+补丁④查询级；2026-10-22 MES 迁 mingda 后改指 100.64.0.2:15221）："
-     "判活=极轻 SELECT 查询级探针（/ping 探不到查询级 500=mes500 缺口）；失联=30min 去重报警"
+     "mingda MES 查询级连通探活（2026-10-26 §三-2 由 ch-mes-local 更名，探针原样）："
+     "判活=极轻 SELECT（/ping 探不到查询级 500=mes500 缺口）；失联=30min 去重报警"
      "（klog+alarms.log 类别码 ch-mes-conn-refused/auth/query/timeout+MES kind=ch_mes_down）；"
      "恢复=mingda systemd 单元 clickhouse-factory.service（Restart=always）自动拉起，持续失联"
-     "人工 ssh mingda-bench systemctl start；本机 127.0.0.1:5221 旧实例=只读 48h 回滚锚，"
-     "不在此探活范围；实现走 urllib（cmd 列的是等价判据命令，凭据从 0600 文件解析）"),
-    ("anolis-proxy-8124", ["ssh", "-o", "ConnectTimeout=5", "-o", "BatchMode=yes",
-                           "anolis", "bash ~/mcode-swev/start-proxy-8124.sh"],
-     "anolis:~/mcode-swev/d36p-proxy-8124.log",
-     "D-43：判活=ssh 端口探活（明文 GET 任意 HTTP 码即活，000=死；ssh 失联=判不准只报警"
-     "30min 去重不拉起）；恢复=ssh 调 anolis:~/mcode-swev/start-proxy-8124.sh"
-     "（setsid+nohup+日志追加，本体 flock 单实例守卫，幂等）；远端代理日志在该 .log，"
-     "本侧只 klog 回传脚本末行（cmd 列的是等价拉起命令，探活命令见 PROXY8124_PROBE_CMD）"),
+     "人工 ssh mingda-bench systemctl start；实现走 urllib（cmd 列的是等价判据命令，"
+     "凭据从 0600 文件解析）"),
 ]
 
 
@@ -1232,8 +1319,9 @@ def print_commands():
         print(f"\n[{name}]\n  cmd : {' '.join(cmd)}\n  log : {logf}\n  姿势: {note}")
 
 
-TARGETS = ["main-sched", "exp-sched", "watch", "dash", "cb-run", "image-feed",
-           "mcode-dispatch", "ch-mes-local", "anolis-proxy-8124"]
+# 2026-10-26 §三-2 退役改造：旧 9 对象收敛为观察期 4 对象（runbook §三-2）。
+# 旧对象的 check/fix 函数保留为无引用死码（见文件头），不在本表=不判活不拉起。
+TARGETS = ["watch", "dash", "af-execline", "mes-ch"]
 
 
 def one_round(dry=False):
@@ -1255,11 +1343,9 @@ def one_round(dry=False):
                 if drained:
                     FIXES[name](dry, t, deb)
             continue  # 防抖超限已报警
-        if name not in ("image-feed", "ch-mes-local", "mcode-dispatch",
-                        "anolis-proxy-8124"):
-            # image-feed/ch-mes-local/mcode-dispatch/anolis-proxy-8124 的 fix 自带
-            # 分支日志（拉起/正常完成/queue_drained/去重报警/ssh 拉起），通用
-            # 「失联 → 处置」行会每轮刷屏，豁免
+        if name not in ("af-execline", "mes-ch"):
+            # af-execline/mes-ch 的 fix 自带分支日志（空闲报警/去重报警/恢复指引），
+            # 通用「失联 → 处置」行会每轮刷屏，豁免
             klog(name, f"失联 → 处置（{detail}）")
         FIXES[name](dry, t, deb)
     gc_watch(dry)   # 补丁③：anolis 镜像池 GC 看护（纯本地判断+spawn 即返回，非阻塞）
@@ -1275,26 +1361,16 @@ def one_round(dry=False):
 one_round.deb = Debounce()
 
 CHECKS = {
-    "main-sched": check_main_sched,
-    "exp-sched": check_exp_sched,
     "watch": check_watch,
     "dash": check_dash,
-    "cb-run": check_cb_run,
-    "image-feed": check_image_feed,
-    "mcode-dispatch": check_mcode_dispatch,
-    "ch-mes-local": check_ch_mes_local,
-    "anolis-proxy-8124": check_anolis_proxy8124,
+    "af-execline": check_af_execline,
+    "mes-ch": check_mes_ch,
 }
 FIXES = {
-    "main-sched": fix_main_sched,
-    "exp-sched": fix_exp_sched,
     "watch": fix_watch,
     "dash": fix_dash,
-    "cb-run": fix_cb_run,
-    "image-feed": fix_image_feed,
-    "mcode-dispatch": fix_mcode_dispatch,
-    "ch-mes-local": fix_ch_mes_local,
-    "anolis-proxy-8124": fix_anolis_proxy8124,
+    "af-execline": fix_af_execline,
+    "mes-ch": fix_mes_ch,
 }
 
 

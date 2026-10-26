@@ -10,7 +10,7 @@
 |---|---|---|
 | LangGraph StateGraph | DSL-G0-表达力-langgraph.md | 12 格中 0 格无条件完整表达、10 格需胶水；写权限模型缺位（节点可写任意通道、LastValue 静默覆盖）、Pydantic 校验仅入口首节点、图无第一方数据表示（AFlow 搜索元循环需自造 schema+每候选 recompile）。可作 L3 执行内核候选，不可作 DSL 本体 |
 | AutoGen Team JSON | DSL-G0-表达力-autogen.md | 12 格 0 完整；"拓扑快照序列化格式"而非定义 DSL——callable/selector/终止条件序列化即丢弃；共享状态=全量广播，读侧仅三旋钮、无写权限；元循环零载体。遗产三样可抄：provider 指认、可组合终止条件、GraphFlow 图模型 |
-| CrewAI YAML | DSL-G0-表达力-crewai.md | AFlow 三格不可表达；schema 契约声明面缺位（expected_output 纯自然语言）、拓扑无循环/反馈边原语（Process 枚举封死）、L0 不变量整体零字段。CrewAI 自己表达图也回退 Python Flows，反证声明式在其体系内仅脚手架 |
+| CrewAI YAML | DSL-G0-表达力-crewai.md | AFlow 四格（契约层/不变量强制/上下文组装/拓扑与角色）全部不可表达；schema 契约声明面缺位（expected_output 纯自然语言）、拓扑无循环/反馈边原语（Process 枚举封死）、L0 不变量整体零字段。CrewAI 自己表达图也回退 Python Flows，反证声明式在其体系内仅脚手架 |
 
 **三方独立结论重合：缺口恰集中在我们四层模型的 L0（不变量强制）与 L1（契约层）——现有框架均无对应概念。自研必要性成立，无需升级架构级复议。**
 
